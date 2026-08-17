@@ -19,7 +19,7 @@ export const studio = {
   ],
 };
 
-export const outreachTargets = [
+const outreachTargetSeed = [
   { name: "Kokomo School Corporation", segment: "Schools / PTOs", place: "Kokomo", status: "Ready to approach", offer: "Field trip + tile-wall fundraiser", priority: 5 },
   { name: "MicroChips Early Learning Center", segment: "Daycare / preschool", place: "Kokomo", status: "Verify first", offer: "Family keepsake coupon", priority: 5 },
   { name: "Kid City USA", segment: "Daycare / preschool", place: "Kokomo", status: "Verify first", offer: "Fired Arts To Go", priority: 5 },
@@ -37,6 +37,16 @@ export const outreachTargets = [
   { name: "Hamilton County HR pipeline", segment: "Corporate / regional", place: "Carmel + north Indy", status: "New lead", offer: "Creative retreat", priority: 3 },
   { name: "Senior activity directors", segment: "Senior / community", place: "40-mile radius", status: "New segment", offer: "Calm daytime social", priority: 3 },
 ];
+
+export const outreachTargets = outreachTargetSeed.map((item, index) => ({
+  id: `target-${String(index + 1).padStart(2, "0")}`,
+  contactName: "",
+  contactEmail: "",
+  contactPhone: "",
+  notes: "",
+  relationshipStatus: item.status === "Ready to approach" ? "Research" : "New",
+  ...item,
+}));
 
 export const competitors = [
   { name: "Oh Slip", type: "Direct ceramics", distance: "~2 mi", audience: "Kids, adults, serious hobbyists", strength: "Vintage molds, wheel, classes, memberships", response: "Contemporary walk-in ease, groups, keepsakes", level: "Direct" },
@@ -78,4 +88,117 @@ export const checklist = [
   { id: "booking", label: "Map the booking workflow", owner: "Operations", detail: "Walk-in, party, class, kiln, pickup, payments, waitlists." },
   { id: "regional", label: "Add Hamilton County HR targets", owner: "Regional", detail: "Carmel and northern Indianapolis retreat buyers." },
   { id: "site", label: "Create three primary CTAs", owner: "Website", detail: "Walk-In Information, Plan a Party, See the Calendar." },
+];
+
+export const platformGuidance = {
+  instagram: { label: "Instagram", icon: "◎", format: "Square 1:1", tone: "red", hookLimit: 80, captionLimit: 2200, description: "Visual storytelling and community engagement." },
+  facebook: { label: "Facebook", icon: "f", format: "Landscape 1.91:1", tone: "blue", hookLimit: 80, captionLimit: 63206, description: "Local reach, events, and fuller detail." },
+  tiktok: { label: "TikTok", icon: "♪", format: "Vertical 9:16", tone: "ink", hookLimit: 80, captionLimit: 2200, description: "Short-form video and creative storytelling." },
+  linkedin: { label: "LinkedIn", icon: "in", format: "Landscape 1.91:1", tone: "blue", hookLimit: 80, captionLimit: 3000, description: "Professional partnerships and community impact." },
+};
+
+export const contentTemplates = [
+  { id: "behind-scenes", title: "Behind the scenes", category: "Studio rhythm", description: "Show the hands, tools, kiln, and small moments that make the studio feel welcoming.", accent: "blue", hook: "A little glimpse behind the glaze.", cta: "Plan your visit" },
+  { id: "finished-work", title: "Finished customer work", category: "Proof + pride", description: "Celebrate the finished piece and invite the next person to imagine what they could make.", accent: "red", hook: "Look what came out of the kiln.", cta: "See the studio" },
+  { id: "events-offers", title: "Events and offers", category: "Conversion", description: "Turn a specific event, workshop, or offer into a clear reason to visit now.", accent: "yellow", hook: "Your next creative night starts here.", cta: "Reserve your seat" },
+  { id: "partner-spotlight", title: "Partner spotlight", category: "Local conversation", description: "Put a local organization or business in the story and make the partnership feel mutual.", accent: "green", hook: "Good things grow when local businesses share the table.", cta: "Start a conversation" },
+  { id: "education", title: "Pottery education", category: "Trust + teaching", description: "Answer a beginner question or explain a studio process in a friendly, useful way.", accent: "blue", hook: "No experience needed—here is how it works.", cta: "Learn more" },
+  { id: "downtown-community", title: "Downtown Kokomo", category: "Regional pull", description: "Make Fired Arts part of a bigger downtown day, not a one-stop errand.", accent: "red", hook: "Make a day of downtown Kokomo.", cta: "Build your day" },
+];
+
+export const assetLibrary = [
+  { id: "asset-glaze", name: "glaze-still-life.png", type: "Image", size: "1600×1000", src: "/glaze-still-life.png", tags: ["studio", "glaze", "hero"] },
+  { id: "asset-logo", name: "regionalgrowth.png", type: "Brand", size: "1672×941", src: "/brand/regionalgrowth.png", tags: ["brand", "logo"] },
+  { id: "asset-studio", name: "studio-exterior.jpg", type: "Image", size: "2400×1600", src: "/glaze-still-life.png", tags: ["downtown", "studio"] },
+  { id: "asset-pots", name: "finished-pieces.jpg", type: "Image", size: "2400×1600", src: "/glaze-still-life.png", tags: ["customer work", "kiln"] },
+];
+
+const makeVariant = (platform, source = {}) => ({
+  id: `variant-${platform}`,
+  platform,
+  format: platformGuidance[platform].format,
+  hook: source.hook || "Make something beautiful in Kokomo.",
+  caption: source.caption || "Come paint a piece, bring a friend, and leave with something that is yours. Fired Arts is a welcoming creative stop in downtown Kokomo.",
+  cta: source.cta || "Plan your visit",
+  hashtags: source.hashtags || "#FiredArts #KokomoCreates #SupportLocal",
+  destinationUrl: source.destinationUrl || "https://firedartsstudio.com/visit",
+  assetIds: source.assetIds || ["asset-glaze"],
+  status: source.status || "Draft",
+  scheduledAt: source.scheduledAt || "",
+});
+
+export const seedCampaigns = [
+  {
+    id: "campaign-pickup-loop",
+    title: "Make the pickup worth returning for",
+    objective: "Turn the one-week pickup moment into a welcome-back visit.",
+    offerId: "pickup",
+    audience: "Finished-piece customers",
+    keyMessage: "Your finished piece is ready—and your next creative visit should be too.",
+    cta: "Plan your next visit",
+    destinationUrl: "https://firedartsstudio.com/visit",
+    startDate: "2026-08-18",
+    endDate: "2026-08-31",
+    status: "Draft",
+    platformIds: Object.keys(platformGuidance),
+    assetIds: ["asset-glaze"],
+    targetIds: [],
+    variants: {
+      instagram: makeVariant("instagram", { hook: "Your piece is ready. What will you make next?", cta: "Plan your next visit" }),
+      facebook: makeVariant("facebook", { hook: "Pickup day can be the start of your next Fired Arts visit.", cta: "Plan your next visit" }),
+      tiktok: makeVariant("tiktok", { hook: "POV: the kiln text just came through.", cta: "See the studio" }),
+      linkedin: makeVariant("linkedin", { hook: "A small pickup moment can build a lasting local habit.", cta: "Start a conversation" }),
+    },
+  },
+  {
+    id: "campaign-school-tile-wall",
+    title: "School tile-wall fundraiser",
+    objective: "Help PTOs create a permanent school keepsake while raising funds.",
+    offerId: "tile-wall",
+    audience: "Schools and PTOs",
+    keyMessage: "A fundraiser students can make together and see for years.",
+    cta: "Request the PTO menu",
+    destinationUrl: "https://firedartsstudio.com/contact",
+    startDate: "2026-08-24",
+    endDate: "2026-09-14",
+    status: "Review",
+    platformIds: Object.keys(platformGuidance),
+    assetIds: ["asset-glaze"],
+    targetIds: ["target-01"],
+    variants: {
+      instagram: makeVariant("instagram", { hook: "Paint a fundraiser your school can keep.", cta: "Request the PTO menu" }),
+      facebook: makeVariant("facebook", { hook: "Give your next school fundraiser a lasting place on the wall.", cta: "Request the PTO menu" }),
+      tiktok: makeVariant("tiktok", { hook: "A whole school, one tile at a time.", cta: "Learn more" }),
+      linkedin: makeVariant("linkedin", { hook: "A creative fundraiser can strengthen both school identity and community connection.", cta: "Start a conversation" }),
+    },
+  },
+];
+
+export const seedConversations = [
+  {
+    id: "conversation-kokomo-school",
+    targetId: "target-01",
+    campaignId: "campaign-school-tile-wall",
+    channel: "Email",
+    contactName: "School partnership lead",
+    status: "Drafted",
+    messageDraft: "Hi — Fired Arts would love to share a simple tile-wall fundraiser idea for Kokomo School Corporation. Students create a lasting installation while the school raises funds. Would you be open to a quick look at the one-page menu?",
+    notes: "Confirm the best PTO contact and flyer permissions before sending.",
+    lastContactedAt: "",
+    nextFollowUpAt: "2026-08-21",
+    history: [],
+  },
+  {
+    id: "conversation-chamber",
+    targetId: "target-13",
+    campaignId: "campaign-pickup-loop",
+    channel: "Email",
+    contactName: "Chamber partnerships",
+    status: "Research",
+    messageDraft: "Hi — Fired Arts is building a few downtown creative experiences that give local businesses an easy way to welcome new visitors. I would love to compare notes on a small team-building or partner night for Chamber members.",
+    notes: "Look for the next member event and identify a warm introduction.",
+    lastContactedAt: "",
+    nextFollowUpAt: "2026-08-28",
+    history: [],
+  },
 ];
