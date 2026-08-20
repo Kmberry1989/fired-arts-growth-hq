@@ -7,24 +7,24 @@ import { FireCreatorSuite } from "./fireCreatorSuite";
 import "./styles.css";
 
 const navItems = [
-  ["creator", "Fire Creator Suite", "✺"],
-  ["overview", "Dashboard", "⌂"],
-  ["campaigns", "Campaigns", "▣"],
-  ["social", "Social Studio", "⌁"],
-  ["calendar", "Content Calendar", "□"],
-  ["conversations", "Conversations", "◌"],
-  ["contacts", "Contacts", "♧"],
-  ["competitors", "Competitors", "◒"],
-  ["offers", "Offers", "✦"],
-  ["operations", "Operations", "▤"],
-  ["research", "Research", "⌘"],
-  ["opportunities", "Opportunities", "✳"],
-  ["metrics", "Metrics", "⌁"],
-  ["assets", "Assets", "▧"],
-  ["templates", "Templates", "◇"],
-  ["approvals", "Approvals", "✓"],
-  ["reports", "Reports", "◫"],
-  ["settings", "Settings", "⚙"],
+  ["creator", "Fire Creator Suite", "spark"],
+  ["overview", "Dashboard", "home"],
+  ["campaigns", "Campaigns", "campaign"],
+  ["social", "Social Studio", "social"],
+  ["calendar", "Content Calendar", "calendar"],
+  ["conversations", "Conversations", "conversation"],
+  ["contacts", "Contacts", "contacts"],
+  ["competitors", "Competitors", "compass"],
+  ["offers", "Offers", "offer"],
+  ["operations", "Operations", "operations"],
+  ["research", "Research", "research"],
+  ["opportunities", "Opportunities", "opportunity"],
+  ["metrics", "Metrics", "metrics"],
+  ["assets", "Assets", "assets"],
+  ["templates", "Templates", "templates"],
+  ["approvals", "Approvals", "approvals"],
+  ["reports", "Reports", "reports"],
+  ["settings", "Settings", "settings"],
 ];
 
 const navGroups = [
@@ -104,12 +104,20 @@ function Arrow({ diagonal = false }) {
   return <span className={diagonal ? "arrow diagonal" : "arrow"} aria-hidden="true">→</span>;
 }
 
+function NavIcon({ name }) {
+  return <span className={`nav-icon nav-icon-${name}`} aria-hidden="true"><span /><i /><b /></span>;
+}
+
+function BrandGlyph({ className = "" }) {
+  return <span className={`brand-glyph ${className}`} aria-hidden="true"><span /><i /><b /></span>;
+}
+
 function Sidebar({ active, setActive }) {
   return (
     <aside className="sidebar">
       <div className="brand-block">
         <img className="brand-lockup" src="/brand/regionalgrowth.png" alt="Fired Arts Studio Regional Growth HQ" />
-        <img className="brand-mark-image" src="/brand/fired-arts-mark.png" alt="" aria-hidden="true" />
+        <BrandGlyph className="brand-mark-glyph" />
       </div>
 
       <nav className="nav-list" aria-label="Main navigation">
@@ -118,7 +126,7 @@ function Sidebar({ active, setActive }) {
           {group.ids.map((id) => {
             const [, label, icon] = navItems.find((item) => item[0] === id);
             return <button key={id} className={`nav-item ${active === id ? "active" : ""}`} onClick={() => setActive(id)}>
-              <span className="nav-icon">{icon}</span>
+              <NavIcon name={icon} />
               <span>{label}</span>
               {active === id && <span className="nav-active-line" />}
             </button>;
@@ -278,7 +286,7 @@ function Overview({ range, setRange, onBuild, onOffer, onTarget, targets, setAct
           <RangeTabs range={range} setRange={setRange} />
         </div>
         <button className="featured-offer" onClick={() => onOffer(offers[0])}>
-          <span className="featured-visual" aria-hidden="true"><img src="/brand/fired-arts-mark.png" alt="" /></span>
+          <span className="featured-visual" aria-hidden="true"><BrandGlyph className="featured-glyph" /></span>
           <span className="featured-overlay" />
           <span className="featured-copy"><strong>Fired Arts<br />To Go</strong><small>Remove the distance barrier <Arrow /></small></span>
           <span className="featured-mark">↗</span>
@@ -502,7 +510,7 @@ function SocialStudioView({ campaign, assets, targets, onChange, onSave, onExpor
     <div className="studio-grid">
       <section className="studio-card brief-card"><div className="studio-card-head"><h2>Campaign Brief</h2><button className="text-button" onClick={() => onChange({ ...campaign, objective: `${campaign.objective} Refine the message for a local, welcoming audience.` })}>Edit</button></div><div className="brief-copy"><small>Objective</small><p>{campaign.objective}</p><small>Key message</small><textarea value={campaign.keyMessage} onChange={(event) => onChange({ ...campaign, keyMessage: event.target.value })} /><small>Audience</small><input value={campaign.audience} onChange={(event) => onChange({ ...campaign, audience: event.target.value })} /><small>Call to action</small><input value={campaign.cta} onChange={(event) => onChange({ ...campaign, cta: event.target.value })} /></div><div className="key-details"><small>Key details</small><strong>{offers.find((offer) => offer.id === campaign.offerId)?.title || "Fired Arts offer"}</strong><span>{campaign.startDate || "Date to be set"} · {campaign.endDate || "Open-ended"}</span><span>Kokomo, Indiana · local-first campaign</span></div></section>
       <section className="studio-card composer-card"><div className="studio-card-head"><h2>Post Composer <small>({guidance.label})</small></h2><span className="code-native">&lt;/&gt; Code-native</span></div><label>Hook <span>{variant.hook.length} / {guidance.hookLimit}</span><input value={variant.hook} onChange={(event) => updateVariant("hook", event.target.value)} /></label><label>Caption <span>{variant.caption.length} / {guidance.captionLimit}</span><textarea value={variant.caption} onChange={(event) => updateVariant("caption", event.target.value)} /></label><label>Call to action<select value={variant.cta} onChange={(event) => updateVariant("cta", event.target.value)}><option>Plan your visit</option><option>Reserve your seat</option><option>Request the PTO menu</option><option>See the studio</option><option>Start a conversation</option><option>Learn more</option></select></label><label>Destination link<input value={variant.destinationUrl} onChange={(event) => updateVariant("destinationUrl", event.target.value)} /></label><label>Hashtags<input value={variant.hashtags} onChange={(event) => updateVariant("hashtags", event.target.value)} /></label><div className="composer-actions"><button className="text-button" onClick={copyPost}>{copyState || "Copy post"} <Arrow /></button><span className={variant.caption.length > guidance.captionLimit ? "validation-warning" : "validation-ready"}>{variant.caption.length > guidance.captionLimit ? "Needs a trim" : "Ready to review"}</span></div></section>
-      <section className="studio-card preview-card"><div className="studio-card-head"><h2>Post Preview <small>({guidance.label})</small></h2><span className="preview-format">{guidance.format}</span></div><div className={`post-preview ${activePlatform}`}><div className="preview-account"><span className="preview-avatar"><img src="/brand/fired-arts-mark.png" alt="" /></span><span><strong>firedartsstudio</strong><small>Kokomo, Indiana</small></span><b>•••</b></div><div className="preview-media">{selectedAsset ? <><img src={selectedAsset.src} alt={selectedAsset.name} /><span>{variant.hook}</span></> : <div className="preview-media-empty"><strong>No visual selected</strong><small>Upload or choose a real campaign image in Assets.</small><button className="text-button" onClick={onOpenAssets}>Open Assets <Arrow /></button></div>}</div><div className="preview-reactions"><span>♡</span><span>◌</span><span>⌁</span><span>□</span></div><p><strong>firedartsstudio</strong> {variant.caption}</p><small className="preview-tags">{variant.hashtags}</small><small className="preview-location">{variant.cta} · Downtown Kokomo</small></div></section>
+      <section className="studio-card preview-card"><div className="studio-card-head"><h2>Post Preview <small>({guidance.label})</small></h2><span className="preview-format">{guidance.format}</span></div><div className={`post-preview ${activePlatform}`}><div className="preview-account"><span className="preview-avatar"><BrandGlyph /></span><span><strong>firedartsstudio</strong><small>Kokomo, Indiana</small></span><b>•••</b></div><div className="preview-media">{selectedAsset ? <><img src={selectedAsset.src} alt={selectedAsset.name} /><span>{variant.hook}</span></> : <div className="preview-media-empty"><strong>No visual selected</strong><small>Upload or choose a real campaign image in Assets.</small><button className="text-button" onClick={onOpenAssets}>Open Assets <Arrow /></button></div>}</div><div className="preview-reactions"><span>♡</span><span>◌</span><span>⌁</span><span>□</span></div><p><strong>firedartsstudio</strong> {variant.caption}</p><small className="preview-tags">{variant.hashtags}</small><small className="preview-location">{variant.cta} · Downtown Kokomo</small></div></section>
       <aside className="studio-rail"><section className="studio-card asset-card"><div className="studio-card-head"><h2>Asset / Shot List</h2><button className="text-button" onClick={onOpenAssets}>Manage Assets</button></div>{assets.length ? assets.slice(0, 4).map((asset) => <label className="asset-row" key={asset.id}><img src={asset.src} alt="" /><span><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small></span><input type="checkbox" checked={(variant.assetIds || []).includes(asset.id)} onChange={() => toggleAsset(asset.id)} /></label>) : <div className="asset-empty-row">No local images yet. Upload one in Assets to add a campaign visual.</div>}</section><section className="studio-card conversation-card"><div className="studio-card-head"><h2>Start the Conversation</h2><button className="text-button" onClick={() => onStartConversation(target)}>View all</button></div><span className="target-kicker">Target business</span><strong>{target.name}</strong><small>{target.segment} · {target.place}</small><p>Turn this campaign into a personal, useful opener for a local partner.</p><button className="ink-button full" onClick={() => onStartConversation(target)}>Draft partner message <Arrow /></button></section></aside>
     </div>
     <section className="platform-overview"><div className="studio-card-head"><h2>Platform adaptations overview</h2><span>One brief · four editable variants</span></div><div className="adaptation-grid">{platformIds.map((id) => <button key={id} className={`adaptation-card ${campaign.variants[id].status.toLowerCase()}`} onClick={() => setActivePlatform(id)}><span className={`platform-symbol ${id}`}>{platformGuidance[id].icon}</span><strong>{platformGuidance[id].label}</strong><small>{platformGuidance[id].format}</small><p>{platformGuidance[id].description}</p><span className="status-chip">{campaign.variants[id].status}</span></button>)}</div></section>
