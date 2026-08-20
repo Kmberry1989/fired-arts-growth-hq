@@ -3,9 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
 import { clearStoredWorkspace, copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, readStoredWorkspace, writeStoredValue } from "./storage";
+import { FireCreatorSuite } from "./fireCreatorSuite";
 import "./styles.css";
 
 const navItems = [
+  ["creator", "Fire Creator Suite", "✺"],
   ["overview", "Dashboard", "⌂"],
   ["campaigns", "Campaigns", "▣"],
   ["social", "Social Studio", "⌁"],
@@ -26,6 +28,7 @@ const navItems = [
 ];
 
 const navGroups = [
+  { label: "Creative tools", ids: ["creator"] },
   { label: "Growth engine", ids: ["overview", "campaigns", "social", "calendar"] },
   { label: "Relationships", ids: ["conversations", "contacts"] },
   { label: "Strategy", ids: ["competitors", "offers", "operations", "research", "opportunities", "metrics"] },
@@ -705,6 +708,7 @@ function App() {
     if (active === "approvals") return <ApprovalsView campaigns={campaigns} onOpen={openCampaign} onApprove={(id) => { const campaign = campaigns.find((item) => item.id === id); if (campaign) updateCampaign({ ...campaign, status: "Approved", variants: Object.fromEntries(platformIds.map((platform) => [platform, { ...campaign.variants[platform], status: "Approved" }])) }); }} />;
     if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} researchContent={researchContent} opportunities={opportunities} metrics={metrics} />;
     if (active === "settings") return <SettingsView onExportWorkspace={exportWorkspace} onResetWorkspace={resetWorkspace} />;
+    if (active === "creator") return <FireCreatorSuite assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} onOpenAssets={() => setActive("assets")} />;
     return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} setActive={setActive} />;
   }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchContent, selectedCampaign, targets]);
 
