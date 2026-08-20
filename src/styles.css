@@ -27,8 +27,8 @@ button { cursor: pointer; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
 
 .app-shell { min-height: 100vh; display: flex; background: var(--paper); }
-.sidebar { width: 262px; flex: 0 0 262px; min-height: 100vh; background: var(--ink); color: #f4efe4; padding: 30px 18px 24px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.sidebar::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .3; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,.06), transparent 26%), repeating-linear-gradient(125deg, transparent 0 4px, rgba(255,255,255,.018) 5px 6px); }
+.sidebar { width: 262px; flex: 0 0 262px; min-height: 100vh; background: #000; color: #f4efe4; padding: 30px 18px 24px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.sidebar::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; background: none; }
 .brand-block, .nav-list, .location-sketch, .bowl-sketch { position: relative; z-index: 1; }
 .brand-block { display: flex; align-items: center; flex-direction: column; text-align: center; padding-bottom: 32px; border-bottom: 1px solid rgba(244,239,228,.32); }
 .brand-name { font: 600 28px/1 var(--serif); letter-spacing: .02em; text-transform: uppercase; }
