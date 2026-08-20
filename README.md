@@ -9,6 +9,7 @@ An interactive React/Vite command center built from the Fired Arts regional mark
 - Competitors: direct, indirect, creative, partner, and regional positioning notes.
 - Offers: Fired Arts To Go, school tile-wall fundraising, homeschool curriculum, Senior Socials, adult nights, downtown packages, and pickup retention.
 - Operations: all-inclusive pricing, one-week firing, 60-day pickup hold, birthday capacity, booking stack comparisons, and readiness checklist.
+- Research → Original files: all 22 supplied CSV, XLSX, HTML, and DOCX files remain available in their original formats with open and download actions.
 
 ## Run locally
 

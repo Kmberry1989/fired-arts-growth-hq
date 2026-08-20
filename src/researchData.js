@@ -7,6 +7,11 @@ export const researchSources = [
   { id: "source-reshare", fileName: "FiredArts_Reshare_Captions.csv", type: "Working calendar", topic: "Reshares", evidenceStatus: "Ready to use", note: "Follow-up copy that turns story responses into another content touchpoint." },
   { id: "source-six-month-metrics", fileName: "Fired Arts 6-Month Marketing Metrics Tracker.xlsx", type: "Tracker workbook", topic: "Measurement", evidenceStatus: "Template", note: "Six-month measurement structure supplied for ongoing manual entry." },
   { id: "source-complete-pack", fileName: "FiredArts_Complete_7Day_Pack.xlsx", type: "Working pack", topic: "Content operations", evidenceStatus: "Ready to use", note: "Combined feed and story planning pack; treated as a convenience copy of the CSV sources." },
+  { id: "source-feed-calendar-xlsx", fileName: "FiredArts_7Day_Content_Calendar.xlsx", type: "Working calendar workbook", topic: "Feed content", evidenceStatus: "Ready to use", note: "Original workbook companion to the seven-day feed CSV." },
+  { id: "source-stories-calendar-xlsx", fileName: "FiredArts_7Day_Stories_Calendar.xlsx", type: "Working calendar workbook", topic: "Stories", evidenceStatus: "Ready to use", note: "Original workbook companion to the seven-day stories CSV." },
+  { id: "source-complete-pack-csv", fileName: "FiredArts_Complete_7Day_Pack.csv", type: "Working pack dataset", topic: "Content operations", evidenceStatus: "Ready to use", note: "Original CSV companion to the combined seven-day workbook." },
+  { id: "source-30-day-analysis", fileName: "full_30_day_analysis_agentic_artifact_2_e692dc656e20.html", type: "Analysis artifact", topic: "30-day analysis", evidenceStatus: "Needs verification", note: "Original HTML analysis artifact supplied with the internal research pack." },
+  { id: "source-pricing-sheet-artifact", fileName: "way_pricing_sheet_fired_agentic_artifact_1_accdbfe1cf93.html", type: "Analysis artifact", topic: "Pricing sheet", evidenceStatus: "Needs verification", note: "Original HTML pricing-sheet artifact supplied with the internal research pack." },
   { id: "source-pyop-process", fileName: "how are pyop pieces created before they get to the pyop studio_.docx", type: "AI conversation transcript", topic: "PYOP manufacturing", evidenceStatus: "Needs verification", note: "Conversation-derived explanation of commercial slip casting and bisque preparation." },
   { id: "source-3d-printing", fileName: "could any of this be done or customized as a process with aid from 3d printing_.docx", type: "AI conversation transcript", topic: "3D-printing options", evidenceStatus: "Hypothesis", note: "Conversation-derived options for master models, mold tooling, and direct ceramic printing." },
   { id: "source-flashforge", fileName: "Flashforge AD5X, any items..docx", type: "AI conversation transcript", topic: "3D-printing workflow", evidenceStatus: "Needs verification", note: "Conversation-derived setup and post-processing suggestions for a plastic master pattern." },
@@ -106,4 +111,3 @@ export const researchDecisions = [
 ];
 
 export const evidenceStatuses = ["All", "Source only", "Ready to use", "Template", "Needs verification", "Hypothesis", "Draft only", "Ready to test", "Baseline"];
-
