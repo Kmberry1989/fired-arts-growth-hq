@@ -1,7 +1,8 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useState } from "react";
 import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
-import { copyToClipboard, exportWorkspaceFile, readStoredValue, writeStoredValue } from "./storage";
+import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
+import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, writeStoredValue } from "./storage";
 import "./styles.css";
 
 const navItems = [
@@ -14,6 +15,9 @@ const navItems = [
   ["competitors", "Competitors", "◒"],
   ["offers", "Offers", "✦"],
   ["operations", "Operations", "▤"],
+  ["research", "Research", "⌘"],
+  ["opportunities", "Opportunities", "✳"],
+  ["metrics", "Metrics", "⌁"],
   ["assets", "Assets", "▧"],
   ["templates", "Templates", "◇"],
   ["approvals", "Approvals", "✓"],
@@ -24,7 +28,7 @@ const navItems = [
 const navGroups = [
   { label: "Growth engine", ids: ["overview", "campaigns", "social", "calendar"] },
   { label: "Relationships", ids: ["conversations", "contacts"] },
-  { label: "Strategy", ids: ["competitors", "offers", "operations"] },
+  { label: "Strategy", ids: ["competitors", "offers", "operations", "research", "opportunities", "metrics"] },
   { label: "Library", ids: ["assets", "templates", "approvals", "reports", "settings"] },
 ];
 
@@ -36,6 +40,36 @@ function makeId(prefix) {
 
 function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function sourceFor(sourceId) {
+  return researchSources.find((source) => source.id === sourceId) || { fileName: "Source not recorded", evidenceStatus: "Needs verification" };
+}
+
+function evidenceClass(value) {
+  return String(value || "").toLowerCase().replaceAll(" ", "-");
+}
+
+function slugify(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function buildFirstContactDraft(target) {
+  const offer = target.offer.toLowerCase();
+  const opening = target.segment.includes("School")
+    ? "I’m reaching out because school groups are looking for creative projects that feel meaningful and easy to organize."
+    : target.segment.includes("Daycare")
+      ? "I’m reaching out because early-learning groups need creative activities that are memorable, manageable, and genuinely fun."
+      : target.segment.includes("Homeschool")
+        ? "I’m reaching out because homeschool families are looking for hands-on learning that connects a good project with a welcoming local space."
+        : target.segment.includes("Scout")
+          ? "I’m reaching out because scout groups are always looking for hands-on experiences that turn a skill into a keepsake."
+          : target.segment.includes("Senior")
+            ? "I’m reaching out because calm, social creative time can be a wonderful fit for the people your group serves."
+            : "I’m reaching out because Fired Arts is building more thoughtful local group experiences beyond the usual birthday format.";
+  const subject = `${target.offer}: an idea for ${target.name}`;
+  const body = `Hi ${target.name} team,\n\n${opening} Fired Arts Studio in Kokomo would love to explore a simple ${offer} idea with you.\n\nThe first version could be a low-friction pilot with a clear group experience, all-inclusive pottery pricing, and pieces ready for pickup after firing in about one week. We can shape the details around your schedule, audience, and permission process.\n\nWould you be the right person to talk with about a ${offer} opportunity in ${target.place}? If so, I’d be happy to send a one-page outline or find a short time to compare notes.\n\nWarmly,\nFired Arts Studio\n(765) 450-3088`;
+  return { subject, body };
 }
 
 function useStoredState(key, fallback) {
@@ -266,20 +300,30 @@ function FilterBar({ options, value, onChange }) {
   return <div className="filter-bar">{options.map((option) => <button className={value === option ? "active" : ""} key={option} onClick={() => onChange(option)}>{option}</button>)}</div>;
 }
 
-function OutreachView({ onTarget }) {
+function OutreachView({ onTarget, onExportPacket }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
+  const [selectedIds, setSelectedIds] = useState([]);
   const filters = ["All", "Ready to approach", "Verify first", "New lead", "New segment"];
   const filtered = outreachTargets.filter((item) => (filter === "All" || item.status === filter) && `${item.name} ${item.segment} ${item.place} ${item.offer}`.toLowerCase().includes(query.toLowerCase()));
+  const filteredIds = filtered.map((item) => item.id);
+  const selectedTargets = outreachTargets.filter((item) => selectedIds.includes(item.id));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((item) => selectedIds.includes(item.id));
+  const toggleTarget = (id) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const toggleFiltered = () => setSelectedIds((current) => allFilteredSelected ? current.filter((id) => !filteredIds.includes(id)) : [...new Set([...current, ...filteredIds])]);
   return (
     <div className="view-content">
       <SectionTitle eyebrow="Regional contact database" title="Target the planners before they book the default." text="A 40-mile outreach system for schools, daycares, homeschool groups, scouts, churches, chambers, senior activities, and regional team-building buyers." />
       <div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search organizations, segments, offers" /><FilterBar options={filters} value={filter} onChange={setFilter} /></div>
+      <section className={`outreach-packet ${selectedTargets.length ? "has-selection" : ""}`} aria-label="Outreach packet export">
+        <div><span className="eyebrow">Outreach packet</span><strong>{selectedTargets.length ? `${selectedTargets.length} target${selectedTargets.length === 1 ? "" : "s"} selected` : "Build a focused first-contact packet"}</strong><small>{selectedTargets.length ? "A CSV index plus one matched draft per target." : "Select filtered targets below to prepare a CSV and individualized drafts."}</small></div>
+        <button className="primary-button" disabled={!selectedTargets.length} onClick={() => onExportPacket(selectedTargets)}>Download ZIP <Arrow /></button>
+      </section>
       <div className="data-table outreach-table">
-        <div className="data-head"><span>Organization</span><span>Segment</span><span>Place</span><span>First offer</span><span>Status</span></div>
-        {filtered.map((row) => <button className="data-row" key={row.name} onClick={() => onTarget(row)}><span><strong>{row.name}</strong><small>Priority {row.priority}/5</small></span><span>{row.segment}</span><span>{row.place}</span><span>{row.offer}</span><span className={`status ${row.status.includes("Ready") ? "ready" : row.status.includes("Verify") ? "verify" : "new"}`}>{row.status}<Arrow /></span></button>)}
+        <div className="data-head"><label className="select-all"><input type="checkbox" checked={allFilteredSelected} onChange={toggleFiltered} aria-label="Select all filtered outreach targets" /><span /></label><span>Organization</span><span>Segment</span><span>Place</span><span>First offer</span><span>Status</span></div>
+        {filtered.map((row) => <div className={`data-row outreach-data-row ${selectedIds.includes(row.id) ? "selected" : ""}`} key={row.name}><label className="target-checkbox"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => toggleTarget(row.id)} aria-label={`Select ${row.name}`} /><span /></label><button className="outreach-row-open" onClick={() => onTarget(row)}><span><strong>{row.name}</strong><small>Priority {row.priority}/5</small></span><span>{row.segment}</span><span>{row.place}</span><span>{row.offer}</span><span className={`status ${row.status.includes("Ready") ? "ready" : row.status.includes("Verify") ? "verify" : "new"}`}>{row.status}<Arrow /></span></button></div>)}
       </div>
-      <div className="view-footer"><span>Showing {filtered.length} working targets · database total {studio.stats.outreach}</span><span>27 rows still need verification</span></div>
+      <div className="view-footer"><span>Showing {filtered.length} working targets · database total {studio.stats.outreach}</span><span>{selectedTargets.length ? `${selectedTargets.length} queued for export` : "Select targets to export"} · 27 rows still need verification</span></div>
     </div>
   );
 }
@@ -299,6 +343,40 @@ function CompetitorsView() {
       <div className="insight-strip"><strong>Monitor three dimensions</strong><span>Birthday price + hassle</span><span>Date-night appeal</span><span>Weather dependency</span></div>
     </div>
   );
+}
+
+function SourcePill({ value }) {
+  return <span className={`evidence-pill ${evidenceClass(value)}`}>{value}</span>;
+}
+
+function ResearchView({ content, onContentChange, onExport }) {
+  const [tab, setTab] = useState("sources");
+  const [filter, setFilter] = useState("All");
+  const [query, setQuery] = useState("");
+  const sourceFiltered = researchSources.filter((source) => (filter === "All" || source.evidenceStatus === filter) && `${source.fileName} ${source.type} ${source.topic} ${source.note}`.toLowerCase().includes(query.toLowerCase()));
+  const contentFiltered = content.filter((item) => `${item.channel} ${item.format} ${item.asset} ${item.copy}`.toLowerCase().includes(query.toLowerCase()));
+  return (
+    <div className="view-content workspace-view">
+      <SectionTitle eyebrow="Research library" title="Turn source material into something the studio can use." text="The research pack is organized by provenance, evidence status, and next action. AI conversation transcripts are clearly labeled so suggestions never become accidental operating facts." action="Export action pack" onAction={onExport} />
+      <div className="research-summary-strip"><div><strong>{researchSources.length}</strong><span>source files indexed</span></div><div><strong>{pricingBenchmark.length + socialBenchmark.length}</strong><span>benchmark rows</span></div><div><strong>{content.length}</strong><span>content actions</span></div><div><strong>{researchOpportunitiesSeed.length}</strong><span>opportunity hypotheses</span></div></div>
+      <div className="research-tabs" role="tablist" aria-label="Research sections"><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>Sources</button><button className={tab === "benchmarks" ? "active" : ""} onClick={() => setTab("benchmarks")}>Benchmarks</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content pack</button></div>
+      {tab === "sources" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search sources and topics" /><FilterBar options={evidenceStatuses} value={filter} onChange={setFilter} /></div><div className="source-grid">{sourceFiltered.map((source) => <article className="source-card" key={source.id}><div className="source-card-head"><span className="source-type">{source.type}</span><SourcePill value={source.evidenceStatus} /></div><h3>{source.topic}</h3><p>{source.note}</p><small>{source.fileName}</small></article>)}</div></>}
+      {tab === "benchmarks" && <div className="research-benchmark-stack"><div><div className="research-section-heading"><div><span className="eyebrow">Pricing comparison</span><h3>What nearby studios make easy to understand</h3></div><small>{pricingBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Location</span><span>Fee model</span><span>Workshop / promotion</span><span>Use in planning</span></div>{pricingBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{sourceFor(row.sourceId).fileName}</small></span><span>{row.location}</span><span>{row.feeModel}</span><span>{row.workshop}<br /><small>{row.promotion}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Social comparison</span><h3>Use competitor observations as test prompts</h3></div><small>{socialBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Audience</span><span>Activity</span><span>Best format</span><span>Test prompt</span></div>{socialBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{row.followers.toLocaleString()} followers · {row.avgLikes} avg likes</small></span><span>{row.platform}</span><span>{row.postsPerWeek}<br /><small>{row.bestTime}</small></span><span>{row.bestFormat}<br /><small>Most posted: {row.mostPosted}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Observed top posts</span><h3>Examples worth studying, not copying blindly</h3></div><small>{topPosts.length} rows</small></div><div className="top-post-grid">{topPosts.map((post) => <article className="top-post-card" key={post.id}><SourcePill value="Source only" /><strong>{post.studio}</strong><span>{post.format} · {post.likes} likes · {post.comments} comments</span><p>{post.theme}</p></article>)}</div></div></div>}
+      {tab === "content" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search content, visuals, CTAs" /><FilterBar options={["All", "Draft", "Ready", "Published", "Results logged"]} value="All" onChange={() => {}} /></div><div className="research-table data-table content-research-table"><div className="data-head"><span>Date</span><span>Channel</span><span>Format / visual</span><span>CTA</span><span>Status</span></div>{contentFiltered.map((item) => <div className="data-row" key={item.id}><span><strong>{item.date}</strong><small>{item.time}</small></span><span>{item.channel}</span><span><strong>{item.format}</strong><small>{item.asset}</small></span><span>{item.cta}</span><span><select value={item.status} onChange={(event) => onContentChange({ ...item, status: event.target.value })}><option>Draft</option><option>Ready</option><option>Published</option><option>Results logged</option></select><small>{sourceFor(item.sourceId).fileName}</small></span></div>)}</div></>}
+    </div>
+  );
+}
+
+function OpportunitiesView({ opportunities, decisions, onOpportunityChange, onDecisionChange }) {
+  const [filter, setFilter] = useState("All");
+  const filtered = opportunities.filter((item) => filter === "All" || item.status === filter || item.category === filter);
+  const filters = ["All", "Ready", "Build", "Validate", "Research", "Parked", "Marketing experiment", "Product experiment"];
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Opportunities and guardrails" title="Make the next experiment small enough to learn from." text="Conversation-derived process ideas remain hypotheses until equipment, safety, labor, cost, and product fit are validated." /><FilterBar options={filters} value={filter} onChange={setFilter} /><div className="opportunity-list">{filtered.map((item) => <article className="opportunity-card" key={item.id}><div className="opportunity-card-head"><div><span className="eyebrow">{item.category}</span><h3>{item.title}</h3></div><SourcePill value={item.evidenceStatus} /></div><div className="opportunity-meta"><span><small>Fit</small><strong>{item.fit}</strong></span><span><small>Risk</small><strong>{item.risk}</strong></span><span><small>Owner</small><strong>{item.owner}</strong></span><label><small>Status</small><select value={item.status} onChange={(event) => onOpportunityChange({ ...item, status: event.target.value })}><option>Ready</option><option>Build</option><option>Validate</option><option>Research</option><option>Parked</option></select></label></div><p><strong>Next test:</strong> {item.nextTest}</p><p className="opportunity-success"><strong>Success signal:</strong> {item.successMetric}</p><small className="source-line">Sources: {item.sourceIds.map((sourceId) => sourceFor(sourceId).fileName).join(" · ")}</small></article>)}</div><section className="decision-log"><div className="research-section-heading"><div><span className="eyebrow">Decision log</span><h3>Keep open questions visible</h3></div><small>Only explicit decisions become policy.</small></div>{decisions.map((decision) => <div className="decision-row" key={decision.id}><span><strong>{decision.question}</strong><small>{decision.decision}</small></span><label><small>Status</small><select value={decision.status} onChange={(event) => onDecisionChange({ ...decision, status: event.target.value })}><option>Open</option><option>Guardrail</option><option>Decided</option><option>Parked</option></select></label><span className="decision-due">{decision.due}</span></div>)}</section></div>;
+}
+
+function MetricsView({ metrics, onMetricChange }) {
+  const grouped = metrics.reduce((groups, metric) => { groups[metric.area] = [...(groups[metric.area] || []), metric]; return groups; }, {});
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Measurement system" title="Measure the work you can actually influence." text="Start with the supplied baseline, then add results from content runs, pickup retention, partner conversations, and product experiments." /><div className="metric-area-grid">{Object.entries(grouped).map(([area, rows]) => <div className="metric-area" key={area}><span className="eyebrow">{area}</span><strong>{rows.length}</strong><small>tracked measures</small></div>)}</div><div className="research-table data-table metrics-table"><div className="data-head"><span>Period</span><span>Metric</span><span>Actual</span><span>Target</span><span>Definition / source</span></div>{metrics.map((metric) => <div className="data-row" key={metric.id}><span><strong>{metric.period}</strong><small>{metric.area}</small></span><span>{metric.metric}</span><label className="metric-edit"><input type="text" value={metric.actual} onChange={(event) => onMetricChange({ ...metric, actual: event.target.value })} /><small>{metric.unit}</small></label><span>{metric.target}</span><span>{metric.definition}<small>{sourceFor(metric.sourceId).fileName}</small></span></div>)}</div><div className="report-note"><strong>Measurement guardrail</strong><p>Competitor observations are context. The operating scorecard should prioritize Fired Arts’ own reach, replies, visits, bookings, pickup returns, partner responses, and experiment margins.</p></div></div>;
 }
 
 function OffersView({ onOffer }) {
@@ -420,9 +498,11 @@ function ApprovalsView({ campaigns, onOpen, onApprove }) {
   return <div className="view-content workspace-view"><SectionTitle eyebrow="Approval queue" title="Review the whole story before it leaves the studio." text="Check the brief, platform variants, assets, and partner tie-in as one campaign." /><div className="approval-list">{reviewCampaigns.map((campaign) => <div className="approval-row" key={campaign.id}><span><strong>{campaign.title}</strong><small>{campaign.audience} · {platformIds.length} variants</small></span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><button className="text-button" onClick={() => onOpen(campaign.id)}>Review <Arrow /></button>{campaign.status === "Review" && <button className="primary-button" onClick={() => onApprove(campaign.id)}>Approve <Arrow /></button>}</div>)}{reviewCampaigns.length === 0 && <div className="empty-state">No campaigns are waiting for review yet.</div>}</div></div>;
 }
 
-function ReportsView({ campaigns, conversations }) {
+function ReportsView({ campaigns, conversations, researchContent, opportunities, metrics }) {
   const sent = conversations.filter((conversation) => ["Sent", "Replied", "Won"].includes(conversation.status)).length;
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Reports" title="See where the growth system is moving." text="A local-first snapshot of campaign readiness and relationship momentum." /><div className="report-grid"><div><small>Campaigns</small><strong>{campaigns.length}</strong><span>working briefs</span></div><div><small>Variants ready</small><strong>{campaigns.reduce((sum, campaign) => sum + Object.values(campaign.variants).filter((variant) => variant.status !== "Draft").length, 0)}</strong><span>across four platforms</span></div><div><small>Conversations</small><strong>{conversations.length}</strong><span>partner threads</span></div><div><small>In motion</small><strong>{sent}</strong><span>sent, replied, or won</span></div></div><div className="report-note"><strong>Next useful question</strong><p>Which local partner can make the next Fired Arts offer feel like part of a larger day in Kokomo?</p></div></div>;
+  const readyContent = researchContent.filter((item) => ["Ready", "Published", "Results logged"].includes(item.status)).length;
+  const activeOpportunities = opportunities.filter((item) => item.status !== "Parked").length;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Reports" title="See where the growth system is moving." text="A local-first snapshot of campaign readiness, research actions, and relationship momentum." /><div className="report-grid"><div><small>Campaigns</small><strong>{campaigns.length}</strong><span>working briefs</span></div><div><small>Variants ready</small><strong>{campaigns.reduce((sum, campaign) => sum + Object.values(campaign.variants).filter((variant) => variant.status !== "Draft").length, 0)}</strong><span>across four platforms</span></div><div><small>Content ready</small><strong>{readyContent}</strong><span>of {researchContent.length} research items</span></div><div><small>In motion</small><strong>{activeOpportunities}</strong><span>of {opportunities.length} opportunities</span></div></div><div className="report-insight-grid"><div><small>Tracked measures</small><strong>{metrics.length}</strong><span>baseline and execution signals</span></div><div><small>Conversations</small><strong>{conversations.length}</strong><span>{sent} sent, replied, or won</span></div></div><div className="report-note"><strong>Next useful question</strong><p>Which research-backed experiment can Fired Arts run this month with a clear owner, safe scope, and result to log?</p></div></div>;
 }
 
 function SettingsView() {
@@ -452,6 +532,10 @@ function App() {
   const [campaigns, setCampaigns] = useStoredState("campaigns", seedCampaigns);
   const [conversations, setConversations] = useStoredState("conversations", seedConversations);
   const [assets, setAssets] = useStoredState("assets", assetLibrary);
+  const [researchContent, setResearchContent] = useStoredState("research-content", researchContentSeed);
+  const [opportunities, setOpportunities] = useStoredState("research-opportunities", researchOpportunitiesSeed);
+  const [metrics, setMetrics] = useStoredState("research-metrics", researchMetricsSeed);
+  const [decisions, setDecisions] = useStoredState("research-decisions", researchDecisionsSeed);
   const [campaignModal, setCampaignModal] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useStoredState("selected-campaign", seedCampaigns[0].id);
 
@@ -483,6 +567,39 @@ function App() {
     const csv = ["campaign,platform,status,scheduledAt,hook,caption,cta,hashtags,destinationUrl", ...rows.map((row) => [row.campaign, row.platform, row.status, row.scheduledAt, row.hook, row.caption, row.cta, row.hashtags, row.destinationUrl].map(csvCell).join(","))].join("\n");
     window.setTimeout(() => exportWorkspaceFile(`${selectedCampaign.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-campaign-pack.csv`, csv, "text/csv"), 150);
   };
+  const exportOutreachPacket = (targets) => {
+    const drafts = targets.map((target) => ({ target, ...buildFirstContactDraft(target), filename: `drafts/${slugify(target.name)}-first-contact.txt` }));
+    const csv = [
+      "id,organization,contact_name,contact_email,contact_phone,segment,place,status,priority,offer,subject,draft_file",
+      ...drafts.map(({ target, subject, filename }) => [target.id, target.name, target.contactName, target.contactEmail, target.contactPhone, target.segment, target.place, target.status, target.priority, target.offer, subject, filename].map(csvCell).join(",")),
+    ].join("\n");
+    const manifest = `Fired Arts Regional Growth HQ\nOutreach packet\nGenerated ${new Date().toISOString().slice(0, 10)}\n\n${targets.length} target${targets.length === 1 ? "" : "s"} selected from the filtered Contacts view.\nIncludes:\n- outreach-targets.csv: target metadata and draft index\n- drafts/: individualized first-contact drafts matched to each target offer\n`;
+    exportWorkspaceZip(`fired-arts-outreach-packet-${new Date().toISOString().slice(0, 10)}.zip`, [
+      { name: "outreach-targets.csv", content: csv },
+      { name: "README.txt", content: manifest },
+      ...drafts.map(({ filename, target, subject, body }) => ({ name: filename, content: `Subject: ${subject}\n\nTarget: ${target.name}\nOffer lane: ${target.offer}\n\n${body}\n` })),
+    ]);
+  };
+  const exportResearchPacket = () => {
+    const sourceCsv = ["id,file_name,type,topic,evidence_status,note", ...researchSources.map((source) => [source.id, source.fileName, source.type, source.topic, source.evidenceStatus, source.note].map(csvCell).join(","))].join("\n");
+    const benchmarkCsv = ["studio,location,fee_model,piece_range,workshop,promotion,planning_use", ...pricingBenchmark.map((row) => [row.studio, row.location, row.feeModel, row.pieceRange, row.workshop, row.promotion, row.implication].map(csvCell).join(","))].join("\n");
+    const socialCsv = ["studio,platform,followers,gain_30d,posts_per_week,avg_likes,avg_comments,best_format,best_time,planning_use", ...socialBenchmark.map((row) => [row.studio, row.platform, row.followers, row.gain30d, row.postsPerWeek, row.avgLikes, row.avgComments, row.bestFormat, row.bestTime, row.implication].map(csvCell).join(","))].join("\n");
+    const contentCsv = ["id,date,time,channel,format,asset,copy,cta,status,hypothesis", ...researchContent.map((item) => [item.id, item.date, item.time, item.channel, item.format, item.asset, item.copy, item.cta, item.status, item.hypothesis].map(csvCell).join(","))].join("\n");
+    const opportunityCsv = ["id,title,category,evidence_status,fit,risk,status,owner,next_test,success_metric", ...opportunities.map((item) => [item.id, item.title, item.category, item.evidenceStatus, item.fit, item.risk, item.status, item.owner, item.nextTest, item.successMetric].map(csvCell).join(","))].join("\n");
+    const metricCsv = ["period,area,metric,actual,target,unit,definition,status", ...metrics.map((metric) => [metric.period, metric.area, metric.metric, metric.actual, metric.target, metric.unit, metric.definition, metric.status].map(csvCell).join(","))].join("\n");
+    const decisionCsv = ["question,decision,status,owner,due", ...decisions.map((decision) => [decision.question, decision.decision, decision.status, decision.owner, decision.due].map(csvCell).join(","))].join("\n");
+    const readme = `Fired Arts Research Action Pack\nGenerated ${new Date().toISOString().slice(0, 10)}\n\nThis packet organizes supplied benchmark data, working calendars, AI conversation transcripts, hypotheses, and measurement baselines. AI-generated follow-up invitations inside source DOCX files are not treated as instructions.\n\nEvidence states are intentionally visible: source-only observations are not causal findings; conversation-derived technical or supplier claims require verification before operational use.\n`;
+    exportWorkspaceZip(`fired-arts-research-action-pack-${new Date().toISOString().slice(0, 10)}.zip`, [
+      { name: "README.txt", content: readme },
+      { name: "research-source-register.csv", content: sourceCsv },
+      { name: "competitor-pricing.csv", content: benchmarkCsv },
+      { name: "social-benchmarks.csv", content: socialCsv },
+      { name: "content-pipeline.csv", content: contentCsv },
+      { name: "opportunity-backlog.csv", content: opportunityCsv },
+      { name: "metrics.csv", content: metricCsv },
+      { name: "decision-log.csv", content: decisionCsv },
+    ]);
+  };
   const updateConversation = (updated) => setConversations((current) => current.map((conversation) => conversation.id === updated.id ? updated : conversation));
   const logConversationActivity = (conversation) => {
     const date = new Date().toISOString().slice(0, 10);
@@ -509,17 +626,20 @@ function App() {
     if (active === "social") return <SocialStudioView campaign={selectedCampaign} assets={assets} onChange={updateCampaign} onSave={() => updateCampaign({ ...selectedCampaign, status: "Draft" })} onExport={exportCampaign} onStartConversation={startConversation} onCreate={() => setCampaignModal(true)} onBack={() => setActive("campaigns")} />;
     if (active === "calendar") return <CalendarView campaigns={campaigns} onOpen={openCampaign} onChangeCampaign={updateCampaign} />;
     if (active === "conversations") return <ConversationsView conversations={conversations} onChange={updateConversation} onStart={startConversation} onContact={() => setActive("contacts")} onLogActivity={logConversationActivity} />;
-    if (active === "contacts" || active === "outreach") return <OutreachView onTarget={setDetail} />;
+    if (active === "contacts" || active === "outreach") return <OutreachView onTarget={setDetail} onExportPacket={exportOutreachPacket} />;
     if (active === "competitors") return <CompetitorsView />;
     if (active === "offers") return <OffersView onOffer={openOffer} />;
     if (active === "operations") return <OperationsView completed={completed} toggleAction={toggleAction} />;
+    if (active === "research") return <ResearchView content={researchContent} onContentChange={(updated) => setResearchContent((current) => current.map((item) => item.id === updated.id ? updated : item))} onExport={exportResearchPacket} />;
+    if (active === "opportunities") return <OpportunitiesView opportunities={opportunities} decisions={decisions} onOpportunityChange={(updated) => setOpportunities((current) => current.map((item) => item.id === updated.id ? updated : item))} onDecisionChange={(updated) => setDecisions((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
+    if (active === "metrics") return <MetricsView metrics={metrics} onMetricChange={(updated) => setMetrics((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
     if (active === "assets") return <AssetsView assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} />;
     if (active === "templates") return <TemplatesView onUse={useTemplate} />;
     if (active === "approvals") return <ApprovalsView campaigns={campaigns} onOpen={openCampaign} onApprove={(id) => { const campaign = campaigns.find((item) => item.id === id); if (campaign) updateCampaign({ ...campaign, status: "Approved", variants: Object.fromEntries(platformIds.map((platform) => [platform, { ...campaign.variants[platform], status: "Approved" }])) }); }} />;
-    if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} />;
+    if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} researchContent={researchContent} opportunities={opportunities} metrics={metrics} />;
     if (active === "settings") return <SettingsView />;
     return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} setActive={setActive} />;
-  }, [active, assets, campaigns, completed, conversations, range, selectedCampaign]);
+  }, [active, assets, campaigns, completed, conversations, decisions, metrics, opportunities, range, researchContent, selectedCampaign]);
 
   return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} /><CampaignModal open={campaignModal} offers={offers} targets={outreachTargets} onClose={() => setCampaignModal(false)} onSave={createCampaign} /></div>;
 }
