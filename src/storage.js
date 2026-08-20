@@ -1,4 +1,4 @@
-const STORAGE_PREFIX = "fired-arts-growth-hq:v1:";
+export const STORAGE_PREFIX = "fired-arts-growth-hq:v1:";
 
 export function readStoredValue(key, fallback) {
   if (typeof window === "undefined") return fallback;
@@ -17,6 +17,26 @@ export function writeStoredValue(key, value) {
   } catch {
     // The UI remains usable if storage is unavailable or quota is exceeded.
   }
+}
+
+export function readStoredWorkspace() {
+  if (typeof window === "undefined") return {};
+  return Object.entries(window.localStorage).reduce((workspace, [key, value]) => {
+    if (!key.startsWith(STORAGE_PREFIX)) return workspace;
+    try {
+      workspace[key.slice(STORAGE_PREFIX.length)] = JSON.parse(value);
+    } catch {
+      workspace[key.slice(STORAGE_PREFIX.length)] = value;
+    }
+    return workspace;
+  }, {});
+}
+
+export function clearStoredWorkspace() {
+  if (typeof window === "undefined") return;
+  Object.keys(window.localStorage)
+    .filter((key) => key.startsWith(STORAGE_PREFIX))
+    .forEach((key) => window.localStorage.removeItem(key));
 }
 
 export function exportWorkspaceFile(filename, payload, type = "application/json") {

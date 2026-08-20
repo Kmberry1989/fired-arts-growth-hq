@@ -18,4 +18,4 @@ The companion glyph outlines are derived from Great Vibes, created by Robert E. 
 }
 ```
 
-Open `fired-arts-specimen.html` for a quick specimen of the logo phrase and the available Latin alphabet.
+The TTF and WOFF2 files are the installable logo-derived font files used by the brand materials.

@@ -21,4 +21,4 @@ The app is intentionally frontend-only. The working data is stored in `src/data.
 
 ## Design direction
 
-Deep ink navigation rail, warm paper canvas, cobalt glaze, terracotta, marigold, and editorial serif typography. The large glaze still-life asset is generated art direction for the regional-growth feature panel; all interface text and controls remain code-native.
+Deep ink navigation rail, warm paper canvas, cobalt, terracotta, marigold, and editorial serif typography. Fired Arts brand imagery is preserved under `public/brand/`; campaign imagery is intentionally user-supplied through the local Assets workflow so previews never rely on generic placeholders.

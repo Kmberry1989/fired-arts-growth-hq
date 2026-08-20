@@ -107,10 +107,7 @@ export const contentTemplates = [
 ];
 
 export const assetLibrary = [
-  { id: "asset-glaze", name: "glaze-still-life.png", type: "Image", size: "1600×1000", src: "/glaze-still-life.png", tags: ["studio", "glaze", "hero"] },
   { id: "asset-logo", name: "regionalgrowth.png", type: "Brand", size: "1672×941", src: "/brand/regionalgrowth.png", tags: ["brand", "logo"] },
-  { id: "asset-studio", name: "studio-exterior.jpg", type: "Image", size: "2400×1600", src: "/glaze-still-life.png", tags: ["downtown", "studio"] },
-  { id: "asset-pots", name: "finished-pieces.jpg", type: "Image", size: "2400×1600", src: "/glaze-still-life.png", tags: ["customer work", "kiln"] },
 ];
 
 const makeVariant = (platform, source = {}) => ({
@@ -122,7 +119,7 @@ const makeVariant = (platform, source = {}) => ({
   cta: source.cta || "Plan your visit",
   hashtags: source.hashtags || "#FiredArts #KokomoCreates #SupportLocal",
   destinationUrl: source.destinationUrl || "https://firedartsstudio.com/visit",
-  assetIds: source.assetIds || ["asset-glaze"],
+  assetIds: source.assetIds || [],
   status: source.status || "Draft",
   scheduledAt: source.scheduledAt || "",
 });
@@ -141,7 +138,7 @@ export const seedCampaigns = [
     endDate: "2026-08-31",
     status: "Draft",
     platformIds: Object.keys(platformGuidance),
-    assetIds: ["asset-glaze"],
+    assetIds: [],
     targetIds: [],
     variants: {
       instagram: makeVariant("instagram", { hook: "Your piece is ready. What will you make next?", cta: "Plan your next visit" }),
@@ -163,7 +160,7 @@ export const seedCampaigns = [
     endDate: "2026-09-14",
     status: "Review",
     platformIds: Object.keys(platformGuidance),
-    assetIds: ["asset-glaze"],
+    assetIds: [],
     targetIds: ["target-01"],
     variants: {
       instagram: makeVariant("instagram", { hook: "Paint a fundraiser your school can keep.", cta: "Request the PTO menu" }),

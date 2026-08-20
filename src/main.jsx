@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useState } from "react";
 import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
-import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, writeStoredValue } from "./storage";
+import { clearStoredWorkspace, copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, readStoredWorkspace, writeStoredValue } from "./storage";
 import "./styles.css";
 
 const navItems = [
@@ -33,6 +33,25 @@ const navGroups = [
 ];
 
 const platformIds = Object.keys(platformGuidance);
+const DELETED_ASSET_IDS = new Set(["asset-glaze", "asset-studio", "asset-pots"]);
+
+function normalizeAssetIds(ids) {
+  return Array.isArray(ids) ? ids.filter((id) => !DELETED_ASSET_IDS.has(id)) : [];
+}
+
+function normalizeAssets(value) {
+  if (!Array.isArray(value)) return assetLibrary;
+  return value.filter((asset) => asset && !DELETED_ASSET_IDS.has(asset.id) && asset.src !== "/glaze-still-life.png");
+}
+
+function normalizeCampaigns(value) {
+  if (!Array.isArray(value)) return seedCampaigns;
+  return value.map((campaign) => ({
+    ...campaign,
+    assetIds: normalizeAssetIds(campaign.assetIds),
+    variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds) }])),
+  }));
+}
 
 function makeId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -72,8 +91,8 @@ function buildFirstContactDraft(target) {
   return { subject, body };
 }
 
-function useStoredState(key, fallback) {
-  const [value, setValue] = useState(() => readStoredValue(key, fallback));
+function useStoredState(key, fallback, normalize = (value) => value) {
+  const [value, setValue] = useState(() => normalize(readStoredValue(key, fallback)));
   useEffect(() => writeStoredValue(key, value), [key, value]);
   return [value, setValue];
 }
@@ -187,18 +206,18 @@ function OfferRows({ onSelect }) {
   );
 }
 
-function OutreachMini({ onOpen }) {
+function OutreachMini({ targets, onOpen, onViewAll }) {
   return (
     <div className="mini-table">
       <div className="mini-table-head"><span>Organization</span><span>Offer lane</span><span>Status</span></div>
-      {outreachTargets.slice(0, 4).map((row) => (
+      {targets.slice(0, 4).map((row) => (
         <button className="mini-row" key={row.name} onClick={() => onOpen(row)}>
           <span><strong>{row.name}</strong><small>{row.place}</small></span>
           <span>{row.offer}</span>
           <span className={row.status === "Ready to approach" ? "status ready" : "status verify"}>{row.status}<Arrow /></span>
         </button>
       ))}
-      <button className="table-footer" onClick={() => onOpen({ segment: "all" })}>View all outreach targets <Arrow /></button>
+      <button className="table-footer" onClick={onViewAll}>View all outreach targets <Arrow /></button>
     </div>
   );
 }
@@ -240,7 +259,7 @@ function Timeline() {
   );
 }
 
-function Overview({ range, setRange, onBuild, onOffer, onTarget, setActive }) {
+function Overview({ range, setRange, onBuild, onOffer, onTarget, targets, setActive }) {
   const rangeCopy = {
     Now: ["This week: turn research into first conversations.", "Prioritize verification, pickup retention, and the first mobile kit."],
     "30 days": ["30 days: make the system repeatable.", "Package the offers, publish the booking path, and test one regional partner."],
@@ -256,7 +275,7 @@ function Overview({ range, setRange, onBuild, onOffer, onTarget, setActive }) {
           <RangeTabs range={range} setRange={setRange} />
         </div>
         <button className="featured-offer" onClick={() => onOffer(offers[0])}>
-          <img src="/glaze-still-life.png" alt="Cobalt glaze and terracotta pottery on handmade paper" />
+          <span className="featured-visual" aria-hidden="true"><img src="/brand/fired-arts-mark.png" alt="" /></span>
           <span className="featured-overlay" />
           <span className="featured-copy"><strong>Fired Arts<br />To Go</strong><small>Remove the distance barrier <Arrow /></small></span>
           <span className="featured-mark">↗</span>
@@ -268,7 +287,7 @@ function Overview({ range, setRange, onBuild, onOffer, onTarget, setActive }) {
       <section className="split-grid">
         <div className="panel outreach-panel">
           <SectionTitle eyebrow="Outreach targets" title="Start with the planners." action="Open contacts" onAction={() => setActive("contacts")} />
-          <OutreachMini onOpen={onTarget} />
+          <OutreachMini targets={targets} onOpen={onTarget} onViewAll={() => setActive("contacts")} />
         </div>
         <div className="panel radius-panel">
           <SectionTitle eyebrow="PYOP radius" title="Make the drive worth it." />
@@ -300,14 +319,14 @@ function FilterBar({ options, value, onChange }) {
   return <div className="filter-bar">{options.map((option) => <button className={value === option ? "active" : ""} key={option} onClick={() => onChange(option)}>{option}</button>)}</div>;
 }
 
-function OutreachView({ onTarget, onExportPacket }) {
+function OutreachView({ targets, onTarget, onTargetChange, onExportPacket }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [selectedIds, setSelectedIds] = useState([]);
   const filters = ["All", "Ready to approach", "Verify first", "New lead", "New segment"];
-  const filtered = outreachTargets.filter((item) => (filter === "All" || item.status === filter) && `${item.name} ${item.segment} ${item.place} ${item.offer}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = targets.filter((item) => (filter === "All" || item.status === filter) && `${item.name} ${item.segment} ${item.place} ${item.offer}`.toLowerCase().includes(query.toLowerCase()));
   const filteredIds = filtered.map((item) => item.id);
-  const selectedTargets = outreachTargets.filter((item) => selectedIds.includes(item.id));
+  const selectedTargets = targets.filter((item) => selectedIds.includes(item.id));
   const allFilteredSelected = filtered.length > 0 && filtered.every((item) => selectedIds.includes(item.id));
   const toggleTarget = (id) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const toggleFiltered = () => setSelectedIds((current) => allFilteredSelected ? current.filter((id) => !filteredIds.includes(id)) : [...new Set([...current, ...filteredIds])]);
@@ -352,9 +371,10 @@ function SourcePill({ value }) {
 function ResearchView({ content, onContentChange, onExport }) {
   const [tab, setTab] = useState("sources");
   const [filter, setFilter] = useState("All");
+  const [contentFilter, setContentFilter] = useState("All");
   const [query, setQuery] = useState("");
   const sourceFiltered = researchSources.filter((source) => (filter === "All" || source.evidenceStatus === filter) && `${source.fileName} ${source.type} ${source.topic} ${source.note}`.toLowerCase().includes(query.toLowerCase()));
-  const contentFiltered = content.filter((item) => `${item.channel} ${item.format} ${item.asset} ${item.copy}`.toLowerCase().includes(query.toLowerCase()));
+  const contentFiltered = content.filter((item) => (contentFilter === "All" || item.status === contentFilter) && `${item.channel} ${item.format} ${item.asset} ${item.copy}`.toLowerCase().includes(query.toLowerCase()));
   return (
     <div className="view-content workspace-view">
       <SectionTitle eyebrow="Research library" title="Turn source material into something the studio can use." text="The research pack is organized by provenance, evidence status, and next action. AI conversation transcripts are clearly labeled so suggestions never become accidental operating facts." action="Export action pack" onAction={onExport} />
@@ -362,7 +382,7 @@ function ResearchView({ content, onContentChange, onExport }) {
       <div className="research-tabs" role="tablist" aria-label="Research sections"><button className={tab === "sources" ? "active" : ""} onClick={() => setTab("sources")}>Sources</button><button className={tab === "benchmarks" ? "active" : ""} onClick={() => setTab("benchmarks")}>Benchmarks</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content pack</button></div>
       {tab === "sources" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search sources and topics" /><FilterBar options={evidenceStatuses} value={filter} onChange={setFilter} /></div><div className="source-grid">{sourceFiltered.map((source) => <article className="source-card" key={source.id}><div className="source-card-head"><span className="source-type">{source.type}</span><SourcePill value={source.evidenceStatus} /></div><h3>{source.topic}</h3><p>{source.note}</p><small>{source.fileName}</small></article>)}</div></>}
       {tab === "benchmarks" && <div className="research-benchmark-stack"><div><div className="research-section-heading"><div><span className="eyebrow">Pricing comparison</span><h3>What nearby studios make easy to understand</h3></div><small>{pricingBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Location</span><span>Fee model</span><span>Workshop / promotion</span><span>Use in planning</span></div>{pricingBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{sourceFor(row.sourceId).fileName}</small></span><span>{row.location}</span><span>{row.feeModel}</span><span>{row.workshop}<br /><small>{row.promotion}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Social comparison</span><h3>Use competitor observations as test prompts</h3></div><small>{socialBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Audience</span><span>Activity</span><span>Best format</span><span>Test prompt</span></div>{socialBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{row.followers.toLocaleString()} followers · {row.avgLikes} avg likes</small></span><span>{row.platform}</span><span>{row.postsPerWeek}<br /><small>{row.bestTime}</small></span><span>{row.bestFormat}<br /><small>Most posted: {row.mostPosted}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Observed top posts</span><h3>Examples worth studying, not copying blindly</h3></div><small>{topPosts.length} rows</small></div><div className="top-post-grid">{topPosts.map((post) => <article className="top-post-card" key={post.id}><SourcePill value="Source only" /><strong>{post.studio}</strong><span>{post.format} · {post.likes} likes · {post.comments} comments</span><p>{post.theme}</p></article>)}</div></div></div>}
-      {tab === "content" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search content, visuals, CTAs" /><FilterBar options={["All", "Draft", "Ready", "Published", "Results logged"]} value="All" onChange={() => {}} /></div><div className="research-table data-table content-research-table"><div className="data-head"><span>Date</span><span>Channel</span><span>Format / visual</span><span>CTA</span><span>Status</span></div>{contentFiltered.map((item) => <div className="data-row" key={item.id}><span><strong>{item.date}</strong><small>{item.time}</small></span><span>{item.channel}</span><span><strong>{item.format}</strong><small>{item.asset}</small></span><span>{item.cta}</span><span><select value={item.status} onChange={(event) => onContentChange({ ...item, status: event.target.value })}><option>Draft</option><option>Ready</option><option>Published</option><option>Results logged</option></select><small>{sourceFor(item.sourceId).fileName}</small></span></div>)}</div></>}
+      {tab === "content" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search content, visuals, CTAs" /><FilterBar options={["All", "Draft", "Ready", "Published", "Results logged"]} value={contentFilter} onChange={setContentFilter} /></div><div className="research-table data-table content-research-table"><div className="data-head"><span>Date</span><span>Channel</span><span>Format / visual</span><span>CTA</span><span>Status</span></div>{contentFiltered.map((item) => <div className="data-row" key={item.id}><span><strong>{item.date}</strong><small>{item.time}</small></span><span>{item.channel}</span><span><strong>{item.format}</strong><small>{item.asset}</small></span><span>{item.cta}</span><span><select value={item.status} onChange={(event) => onContentChange({ ...item, status: event.target.value })}><option>Draft</option><option>Ready</option><option>Published</option><option>Results logged</option></select><small>{sourceFor(item.sourceId).fileName}</small></span></div>)}</div></>}
     </div>
   );
 }
@@ -379,24 +399,33 @@ function MetricsView({ metrics, onMetricChange }) {
   return <div className="view-content workspace-view"><SectionTitle eyebrow="Measurement system" title="Measure the work you can actually influence." text="Start with the supplied baseline, then add results from content runs, pickup retention, partner conversations, and product experiments." /><div className="metric-area-grid">{Object.entries(grouped).map(([area, rows]) => <div className="metric-area" key={area}><span className="eyebrow">{area}</span><strong>{rows.length}</strong><small>tracked measures</small></div>)}</div><div className="research-table data-table metrics-table"><div className="data-head"><span>Period</span><span>Metric</span><span>Actual</span><span>Target</span><span>Definition / source</span></div>{metrics.map((metric) => <div className="data-row" key={metric.id}><span><strong>{metric.period}</strong><small>{metric.area}</small></span><span>{metric.metric}</span><label className="metric-edit"><input type="text" value={metric.actual} onChange={(event) => onMetricChange({ ...metric, actual: event.target.value })} /><small>{metric.unit}</small></label><span>{metric.target}</span><span>{metric.definition}<small>{sourceFor(metric.sourceId).fileName}</small></span></div>)}</div><div className="report-note"><strong>Measurement guardrail</strong><p>Competitor observations are context. The operating scorecard should prioritize Fired Arts’ own reach, replies, visits, bookings, pickup returns, partner responses, and experiment margins.</p></div></div>;
 }
 
-function OffersView({ onOffer }) {
+function OffersView({ onOffer, offerDrafts }) {
   return (
     <div className="view-content">
       <SectionTitle eyebrow="Offer architecture" title="Create reasons to return beyond birthdays." text="Every offer is designed to support a different growth lever: distance, daytime capacity, repeat behavior, or partner reach." />
       <div className="offer-library">
         {offers.map((offer) => <button className="offer-card" key={offer.id} onClick={() => onOffer(offer)}><span className={`offer-card-top ${offer.accent}`}><span>{offer.status}</span><Arrow /></span><span className="offer-card-title">{offer.title}</span><span className="offer-card-category">{offer.category}</span><p>{offer.description}</p><span className="offer-card-next"><small>First move</small><strong>{offer.firstStep}</strong></span></button>)}
       </div>
+      <section className="saved-drafts"><div className="block-heading"><span>Saved offer drafts</span><small>{offerDrafts.length} local draft{offerDrafts.length === 1 ? "" : "s"}</small></div>{offerDrafts.length ? offerDrafts.map((draft) => <div className="saved-draft-row" key={draft.id}><span><strong>{draft.title}</strong><small>{draft.audience} · saved {draft.createdAt}</small></span><span>{draft.message}</span></div>) : <div className="empty-state">Open an offer above and save a tailored first message to keep it in the local offer queue.</div>}</section>
     </div>
   );
 }
 
-function OperationsView({ completed, toggleAction }) {
+function CouponModal({ coupon, onClose, onSave, onCopy, onExport }) {
+  const [draft, setDraft] = useState(coupon);
+  const [copyState, setCopyState] = useState("");
+  const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const copyCoupon = async () => { const copied = await onCopy(draft); setCopyState(copied ? "Copied" : "Select and copy"); window.setTimeout(() => setCopyState(""), 1800); };
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="builder-modal" role="dialog" aria-modal="true" aria-labelledby="coupon-title" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close coupon draft">×</button><div className="eyebrow">Pickup retention</div><h2 id="coupon-title">Draft the welcome-back coupon</h2><p>Save one clear offer that staff can attach to the pickup moment and export when it is ready to use.</p><label>Coupon title<input value={draft.title} onChange={(event) => update("title", event.target.value)} /></label><label>Code<input value={draft.code} onChange={(event) => update("code", event.target.value.toUpperCase())} /></label><label>Offer<input value={draft.offer} onChange={(event) => update("offer", event.target.value)} /></label><label>Terms<textarea value={draft.terms} onChange={(event) => update("terms", event.target.value)} /></label><div className="modal-actions"><button className="primary-button" onClick={() => onSave(draft)}>Save coupon <Arrow /></button><button className="text-button" onClick={copyCoupon}>{copyState || "Copy"}</button><button className="ink-button" onClick={() => onExport(draft)}>Export</button></div></div></div>;
+}
+
+function OperationsView({ completed, toggleAction, onDraftCoupon, coupon }) {
   return (
     <div className="view-content">
       <SectionTitle eyebrow="Operations & systems" title="The promise is only as strong as the handoff." text="Make the one-week pickup, group booking, mobile logistics, and regional growth engine feel effortless behind the scenes." />
       <div className="operations-grid">
         <section className="operation-block baseline-block"><div className="block-heading"><span>Current baseline</span><small>Use in website copy</small></div>{studio.baseline.map(([label, value, note]) => <div className="baseline-row" key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>)}</section>
-        <section className="operation-block pickup-block"><div className="block-heading"><span>Pickup loop</span><small>Retention opportunity</small></div><div className="pickup-steps"><div><span>01</span><strong>Paint</strong><small>All-inclusive visit</small></div><i /> <div><span>02</span><strong>Fire</strong><small>Ready in one week</small></div><i /> <div><span>03</span><strong>Return</strong><small>Welcome-back offer</small></div></div><button className="ink-button">Draft the coupon <Arrow /></button></section>
+        <section className="operation-block pickup-block"><div className="block-heading"><span>Pickup loop</span><small>Retention opportunity</small></div><div className="pickup-steps"><div><span>01</span><strong>Paint</strong><small>All-inclusive visit</small></div><i /> <div><span>02</span><strong>Fire</strong><small>Ready in one week</small></div><i /> <div><span>03</span><strong>Return</strong><small>Welcome-back offer</small></div></div><button className="ink-button" onClick={onDraftCoupon}>{coupon.code ? `Edit ${coupon.code}` : "Draft the coupon"} <Arrow /></button></section>
         <section className="operation-block stack-block"><div className="block-heading"><span>Booking stack candidates</span><small>Test before committing</small></div>{software.slice(0, 4).map((item) => <div className="stack-row" key={item.name}><span><strong>{item.name}</strong><small>{item.role}</small></span><span className={`fit ${item.fit.toLowerCase().replaceAll(" ", "-")}`}>{item.fit}</span><span className="stack-note">{item.note}</span></div>)}</section>
         <section className="operation-block checklist-block"><div className="block-heading"><span>Readiness checklist</span><small>{Object.values(completed).filter(Boolean).length}/{checklist.length} checked</small></div>{checklist.map((item) => <label className={`check-row ${completed[item.id] ? "done" : ""}`} key={item.id}><input type="checkbox" checked={Boolean(completed[item.id])} onChange={() => toggleAction(item.id)} /><span className="check-box">✓</span><span><strong>{item.label}</strong><small>{item.owner} · {item.detail}</small></span></label>)}</section>
       </div>
@@ -440,17 +469,17 @@ function CampaignsView({ campaigns, onOpen, onCreate }) {
   </div>;
 }
 
-function SocialStudioView({ campaign, assets, onChange, onSave, onExport, onStartConversation, onCreate, onBack }) {
+function SocialStudioView({ campaign, assets, targets, onChange, onSave, onExport, onStartConversation, onOpenAssets, onCreate, onBack }) {
   const [activePlatform, setActivePlatform] = useState("instagram");
   const [copyState, setCopyState] = useState("");
   if (!campaign) return <div className="view-content"><SectionTitle eyebrow="Social Studio" title="Choose a campaign to begin." text="Create a campaign first, then adapt the same idea across Instagram, Facebook, TikTok, and LinkedIn." action="New campaign" onAction={onCreate} /></div>;
   const editingPlatform = activePlatform === "brief" ? "instagram" : activePlatform;
   const variant = campaign.variants[editingPlatform];
   const guidance = platformGuidance[editingPlatform];
-  const selectedAsset = assets.find((asset) => variant.assetIds.includes(asset.id)) || assets[0];
-  const target = outreachTargets.find((item) => campaign.targetIds?.includes(item.id)) || outreachTargets[0];
+  const selectedAsset = assets.find((asset) => (variant.assetIds || []).includes(asset.id)) || null;
+  const target = targets.find((item) => campaign.targetIds?.includes(item.id)) || targets[0];
   const updateVariant = (field, value) => onChange({ ...campaign, variants: { ...campaign.variants, [editingPlatform]: { ...variant, [field]: value } } });
-  const toggleAsset = (assetId) => updateVariant("assetIds", variant.assetIds.includes(assetId) ? variant.assetIds.filter((id) => id !== assetId) : [...variant.assetIds, assetId]);
+  const toggleAsset = (assetId) => updateVariant("assetIds", (variant.assetIds || []).includes(assetId) ? variant.assetIds.filter((id) => id !== assetId) : [...(variant.assetIds || []), assetId]);
   const toggleReview = () => { const nextStatus = campaign.status === "Review" ? "Draft" : "Review"; onChange({ ...campaign, status: nextStatus, variants: Object.fromEntries(platformIds.map((id) => [id, { ...campaign.variants[id], status: nextStatus }])) }); };
   const copyPost = async () => { const copied = await copyToClipboard(`${variant.hook}\n\n${variant.caption}\n\n${variant.hashtags}`); setCopyState(copied ? "Copied" : "Select and copy"); window.setTimeout(() => setCopyState(""), 1800); };
   return <div className="view-content studio-view">
@@ -459,8 +488,8 @@ function SocialStudioView({ campaign, assets, onChange, onSave, onExport, onStar
     <div className="studio-grid">
       <section className="studio-card brief-card"><div className="studio-card-head"><h2>Campaign Brief</h2><button className="text-button" onClick={() => onChange({ ...campaign, objective: `${campaign.objective} Refine the message for a local, welcoming audience.` })}>Edit</button></div><div className="brief-copy"><small>Objective</small><p>{campaign.objective}</p><small>Key message</small><textarea value={campaign.keyMessage} onChange={(event) => onChange({ ...campaign, keyMessage: event.target.value })} /><small>Audience</small><input value={campaign.audience} onChange={(event) => onChange({ ...campaign, audience: event.target.value })} /><small>Call to action</small><input value={campaign.cta} onChange={(event) => onChange({ ...campaign, cta: event.target.value })} /></div><div className="key-details"><small>Key details</small><strong>{offers.find((offer) => offer.id === campaign.offerId)?.title || "Fired Arts offer"}</strong><span>{campaign.startDate || "Date to be set"} · {campaign.endDate || "Open-ended"}</span><span>Kokomo, Indiana · local-first campaign</span></div></section>
       <section className="studio-card composer-card"><div className="studio-card-head"><h2>Post Composer <small>({guidance.label})</small></h2><span className="code-native">&lt;/&gt; Code-native</span></div><label>Hook <span>{variant.hook.length} / {guidance.hookLimit}</span><input value={variant.hook} onChange={(event) => updateVariant("hook", event.target.value)} /></label><label>Caption <span>{variant.caption.length} / {guidance.captionLimit}</span><textarea value={variant.caption} onChange={(event) => updateVariant("caption", event.target.value)} /></label><label>Call to action<select value={variant.cta} onChange={(event) => updateVariant("cta", event.target.value)}><option>Plan your visit</option><option>Reserve your seat</option><option>Request the PTO menu</option><option>See the studio</option><option>Start a conversation</option><option>Learn more</option></select></label><label>Destination link<input value={variant.destinationUrl} onChange={(event) => updateVariant("destinationUrl", event.target.value)} /></label><label>Hashtags<input value={variant.hashtags} onChange={(event) => updateVariant("hashtags", event.target.value)} /></label><div className="composer-actions"><button className="text-button" onClick={copyPost}>{copyState || "Copy post"} <Arrow /></button><span className={variant.caption.length > guidance.captionLimit ? "validation-warning" : "validation-ready"}>{variant.caption.length > guidance.captionLimit ? "Needs a trim" : "Ready to review"}</span></div></section>
-      <section className="studio-card preview-card"><div className="studio-card-head"><h2>Post Preview <small>({guidance.label})</small></h2><span className="preview-format">{guidance.format}</span></div><div className={`post-preview ${activePlatform}`}><div className="preview-account"><span className="preview-avatar"><img src="/brand/fired-arts-mark.png" alt="" /></span><span><strong>firedartsstudio</strong><small>Kokomo, Indiana</small></span><b>•••</b></div><div className="preview-media"><img src={selectedAsset.src} alt={selectedAsset.name} /><span>{variant.hook}</span></div><div className="preview-reactions"><span>♡</span><span>◌</span><span>⌁</span><span>□</span></div><p><strong>firedartsstudio</strong> {variant.caption}</p><small className="preview-tags">{variant.hashtags}</small><small className="preview-location">{variant.cta} · Downtown Kokomo</small></div></section>
-      <aside className="studio-rail"><section className="studio-card asset-card"><div className="studio-card-head"><h2>Asset / Shot List</h2><span>Use Assets to upload</span></div>{assets.slice(0, 4).map((asset) => <label className="asset-row" key={asset.id}><img src={asset.src} alt="" /><span><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small></span><input type="checkbox" checked={variant.assetIds.includes(asset.id)} onChange={() => toggleAsset(asset.id)} /></label>)}</section><section className="studio-card conversation-card"><div className="studio-card-head"><h2>Start the Conversation</h2><button className="text-button" onClick={() => onStartConversation(target)}>View all</button></div><span className="target-kicker">Target business</span><strong>{target.name}</strong><small>{target.segment} · {target.place}</small><p>Turn this campaign into a personal, useful opener for a local partner.</p><button className="ink-button full" onClick={() => onStartConversation(target)}>Draft partner message <Arrow /></button></section></aside>
+      <section className="studio-card preview-card"><div className="studio-card-head"><h2>Post Preview <small>({guidance.label})</small></h2><span className="preview-format">{guidance.format}</span></div><div className={`post-preview ${activePlatform}`}><div className="preview-account"><span className="preview-avatar"><img src="/brand/fired-arts-mark.png" alt="" /></span><span><strong>firedartsstudio</strong><small>Kokomo, Indiana</small></span><b>•••</b></div><div className="preview-media">{selectedAsset ? <><img src={selectedAsset.src} alt={selectedAsset.name} /><span>{variant.hook}</span></> : <div className="preview-media-empty"><strong>No visual selected</strong><small>Upload or choose a real campaign image in Assets.</small><button className="text-button" onClick={onOpenAssets}>Open Assets <Arrow /></button></div>}</div><div className="preview-reactions"><span>♡</span><span>◌</span><span>⌁</span><span>□</span></div><p><strong>firedartsstudio</strong> {variant.caption}</p><small className="preview-tags">{variant.hashtags}</small><small className="preview-location">{variant.cta} · Downtown Kokomo</small></div></section>
+      <aside className="studio-rail"><section className="studio-card asset-card"><div className="studio-card-head"><h2>Asset / Shot List</h2><button className="text-button" onClick={onOpenAssets}>Manage Assets</button></div>{assets.length ? assets.slice(0, 4).map((asset) => <label className="asset-row" key={asset.id}><img src={asset.src} alt="" /><span><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small></span><input type="checkbox" checked={(variant.assetIds || []).includes(asset.id)} onChange={() => toggleAsset(asset.id)} /></label>) : <div className="asset-empty-row">No local images yet. Upload one in Assets to add a campaign visual.</div>}</section><section className="studio-card conversation-card"><div className="studio-card-head"><h2>Start the Conversation</h2><button className="text-button" onClick={() => onStartConversation(target)}>View all</button></div><span className="target-kicker">Target business</span><strong>{target.name}</strong><small>{target.segment} · {target.place}</small><p>Turn this campaign into a personal, useful opener for a local partner.</p><button className="ink-button full" onClick={() => onStartConversation(target)}>Draft partner message <Arrow /></button></section></aside>
     </div>
     <section className="platform-overview"><div className="studio-card-head"><h2>Platform adaptations overview</h2><span>One brief · four editable variants</span></div><div className="adaptation-grid">{platformIds.map((id) => <button key={id} className={`adaptation-card ${campaign.variants[id].status.toLowerCase()}`} onClick={() => setActivePlatform(id)}><span className={`platform-symbol ${id}`}>{platformGuidance[id].icon}</span><strong>{platformGuidance[id].label}</strong><small>{platformGuidance[id].format}</small><p>{platformGuidance[id].description}</p><span className="status-chip">{campaign.variants[id].status}</span></button>)}</div></section>
   </div>;
@@ -473,20 +502,20 @@ function CalendarView({ campaigns, onOpen, onChangeCampaign }) {
   return <div className="view-content workspace-view"><SectionTitle eyebrow="Content calendar" title="Keep the good ideas moving." text="Prepare a steady rhythm of posts without losing the local story behind each campaign." /><div className="view-toolbar"><FilterBar options={["All", "Draft", "Review", "Approved", "Queued"]} value={filter} onChange={setFilter} /><span className="calendar-note">{rows.length} platform variants · publishing remains manual in v1</span></div><div className="calendar-list">{rows.map((row) => <div className="calendar-row" key={`${row.campaign.id}-${row.platform}`}><span className="calendar-date">{row.date}</span><span className={`platform-symbol ${row.platform}`}>{platformGuidance[row.platform].icon}</span><button className="calendar-row-open" onClick={() => onOpen(row.campaign.id)}><strong>{row.campaign.title}</strong><small>{platformGuidance[row.platform].label} · {row.variant.hook}</small></button><label className="calendar-control"><span>Date</span><input type="date" value={row.variant.scheduledAt || row.campaign.startDate || ""} onChange={(event) => updateVariant(row.campaign, row.platform, { scheduledAt: event.target.value })} /></label><label className="calendar-control"><span>Status</span><select value={row.variant.status} onChange={(event) => updateVariant(row.campaign, row.platform, { status: event.target.value })}>{["Draft", "Review", "Approved", "Queued"].map((status) => <option key={status}>{status}</option>)}</select></label></div>)}</div></div>;
 }
 
-function ConversationsView({ conversations, onChange, onStart, onContact, onLogActivity }) {
+function ConversationsView({ conversations, targets, onChange, onStart, onContact, onLogActivity }) {
   const [selectedId, setSelectedId] = useState(conversations[0]?.id || "");
   const selected = conversations.find((conversation) => conversation.id === selectedId) || conversations[0];
   if (!selected) return <div className="view-content"><SectionTitle eyebrow="Conversations" title="Start with a useful reason to talk." text="Create your first partner conversation from a local target or campaign." action="Open Contacts" onAction={onContact} /></div>;
-  const target = outreachTargets.find((item) => item.id === selected.targetId) || outreachTargets[0];
+  const target = targets.find((item) => item.id === selected.targetId) || targets[0];
   const patchConversation = (changes) => onChange({ ...selected, ...changes });
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Local partner conversations" title="Make the first message feel like a real invitation." text="Track the people, businesses, and organizations that can help Fired Arts become part of a larger local day." action="Open contacts" onAction={onContact} /><div className="conversation-layout"><div className="conversation-list">{conversations.map((conversation) => { const item = outreachTargets.find((row) => row.id === conversation.targetId) || {}; return <button className={`conversation-list-row ${conversation.id === selected.id ? "selected" : ""}`} key={conversation.id} onClick={() => setSelectedId(conversation.id)}><span className="conversation-avatar">{item.name?.slice(0, 1)}</span><span><strong>{item.name}</strong><small>{conversation.status} · {conversation.nextFollowUpAt || "No follow-up"}</small></span><Arrow /></button>; })}<button className="table-footer" onClick={() => onStart(target)}>+ Start a conversation <Arrow /></button></div><section className="conversation-detail studio-card"><div className="studio-card-head"><div><div className="eyebrow">{target.segment}</div><h2>{target.name}</h2></div><span className={`status-chip ${selected.status.toLowerCase().replaceAll(" ", "-")}`}>{selected.status}</span></div><div className="drawer-meta"><span><small>Place</small><strong>{target.place}</strong></span><span><small>Offer lane</small><strong>{target.offer}</strong></span></div><label>Channel<select value={selected.channel} onChange={(event) => patchConversation({ channel: event.target.value })}><option>Email</option><option>Instagram DM</option><option>Phone</option><option>In person</option><option>LinkedIn</option></select></label><label>Contact name<input value={selected.contactName} onChange={(event) => patchConversation({ contactName: event.target.value })} placeholder="Add a person when verified" /></label><label>Personalized message<textarea value={selected.messageDraft} onChange={(event) => patchConversation({ messageDraft: event.target.value })} /></label><label>Notes<textarea value={selected.notes} onChange={(event) => patchConversation({ notes: event.target.value })} /></label><div className="conversation-actions"><label>Follow-up date<input type="date" value={selected.nextFollowUpAt || ""} onChange={(event) => patchConversation({ nextFollowUpAt: event.target.value })} /></label><label>Status<select value={selected.status} onChange={(event) => patchConversation({ status: event.target.value })}>{["New", "Research", "Drafted", "Sent", "Replied", "Follow-up", "Won", "Paused"].map((status) => <option key={status}>{status}</option>)}</select></label></div>{selected.history?.length > 0 && <div className="activity-log"><div className="activity-log-head"><strong>Activity log</strong><small>{selected.history.length} logged</small></div>{selected.history.slice().reverse().map((entry) => <div className="activity-entry" key={entry.id}><span>{entry.date}</span><p><strong>{entry.type}</strong> via {entry.channel}<br />{entry.body}</p></div>)}</div>}<div className="modal-actions"><button className="primary-button" onClick={() => onLogActivity(selected)}>Mark sent & log <Arrow /></button><button className="text-button" onClick={() => copyToClipboard(selected.messageDraft)}>Copy message <Arrow /></button><span className="success-note">Saved locally</span></div></section></div></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Local partner conversations" title="Make the first message feel like a real invitation." text="Track the people, businesses, and organizations that can help Fired Arts become part of a larger local day." action="Open contacts" onAction={onContact} /><div className="conversation-layout"><div className="conversation-list">{conversations.map((conversation) => { const item = targets.find((row) => row.id === conversation.targetId) || {}; return <button className={`conversation-list-row ${conversation.id === selected.id ? "selected" : ""}`} key={conversation.id} onClick={() => setSelectedId(conversation.id)}><span className="conversation-avatar">{item.name?.slice(0, 1)}</span><span><strong>{item.name}</strong><small>{conversation.status} · {conversation.nextFollowUpAt || "No follow-up"}</small></span><Arrow /></button>; })}<button className="table-footer" onClick={() => onStart(target)}>+ Start a conversation <Arrow /></button></div><section className="conversation-detail studio-card"><div className="studio-card-head"><div><div className="eyebrow">{target.segment}</div><h2>{target.name}</h2></div><span className={`status-chip ${selected.status.toLowerCase().replaceAll(" ", "-")}`}>{selected.status}</span></div><div className="drawer-meta"><span><small>Place</small><strong>{target.place}</strong></span><span><small>Offer lane</small><strong>{target.offer}</strong></span></div><label>Channel<select value={selected.channel} onChange={(event) => patchConversation({ channel: event.target.value })}><option>Email</option><option>Instagram DM</option><option>Phone</option><option>In person</option><option>LinkedIn</option></select></label><label>Contact name<input value={selected.contactName} onChange={(event) => patchConversation({ contactName: event.target.value })} placeholder="Add a person when verified" /></label><label>Personalized message<textarea value={selected.messageDraft} onChange={(event) => patchConversation({ messageDraft: event.target.value })} /></label><label>Notes<textarea value={selected.notes} onChange={(event) => patchConversation({ notes: event.target.value })} /></label><div className="conversation-actions"><label>Follow-up date<input type="date" value={selected.nextFollowUpAt || ""} onChange={(event) => patchConversation({ nextFollowUpAt: event.target.value })} /></label><label>Status<select value={selected.status} onChange={(event) => patchConversation({ status: event.target.value })}>{["New", "Research", "Drafted", "Sent", "Replied", "Follow-up", "Won", "Paused"].map((status) => <option key={status}>{status}</option>)}</select></label></div>{selected.history?.length > 0 && <div className="activity-log"><div className="activity-log-head"><strong>Activity log</strong><small>{selected.history.length} logged</small></div>{selected.history.slice().reverse().map((entry) => <div className="activity-entry" key={entry.id}><span>{entry.date}</span><p><strong>{entry.type}</strong> via {entry.channel}<br />{entry.body}</p></div>)}</div>}<div className="modal-actions"><button className="primary-button" onClick={() => onLogActivity(selected)}>Mark sent & log <Arrow /></button><button className="text-button" onClick={() => copyToClipboard(selected.messageDraft)}>Copy message <Arrow /></button><span className="success-note">Saved locally</span></div></section></div></div>;
 }
 
-function AssetsView({ assets, onAddAsset }) {
+function AssetsView({ assets, onAddAsset, onRemoveAsset }) {
   const [query, setQuery] = useState("");
   const filtered = assets.filter((asset) => `${asset.name} ${asset.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
   const handleUpload = (event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => onAddAsset({ id: makeId("asset"), name: file.name, type: "Uploaded image", size: `${Math.round(file.size / 1024)} KB`, src: reader.result, tags: ["uploaded", "session"] }); reader.readAsDataURL(file); event.target.value = ""; };
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="A lightweight local library for brand marks, studio images, finished work, and campaign-ready shots." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className="primary-button upload-button">Add local asset <Arrow /><input type="file" accept="image/*" onChange={handleUpload} /></label></div><div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small><span>{asset.tags.join(" · ")}</span></div></article>)}</div></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="Upload real studio or campaign images locally, then select them in Social Studio. The Fired Arts brand lockup remains available as a protected brand asset." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className="primary-button upload-button">Add local asset <Arrow /><input type="file" accept="image/*" onChange={handleUpload} /></label></div>{filtered.length ? <div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small><span>{asset.tags.join(" · ")}</span><button className="text-button asset-remove" disabled={asset.type === "Brand"} onClick={() => onRemoveAsset(asset.id)}>{asset.type === "Brand" ? "Brand asset" : "Remove asset"}</button></div></article>)}</div> : <div className="empty-state asset-empty-state">No assets match this search. Upload a real Fired Arts image to use it in a campaign.</div>}</div>;
 }
 
 function TemplatesView({ onUse }) {
@@ -505,23 +534,39 @@ function ReportsView({ campaigns, conversations, researchContent, opportunities,
   return <div className="view-content workspace-view"><SectionTitle eyebrow="Reports" title="See where the growth system is moving." text="A local-first snapshot of campaign readiness, research actions, and relationship momentum." /><div className="report-grid"><div><small>Campaigns</small><strong>{campaigns.length}</strong><span>working briefs</span></div><div><small>Variants ready</small><strong>{campaigns.reduce((sum, campaign) => sum + Object.values(campaign.variants).filter((variant) => variant.status !== "Draft").length, 0)}</strong><span>across four platforms</span></div><div><small>Content ready</small><strong>{readyContent}</strong><span>of {researchContent.length} research items</span></div><div><small>In motion</small><strong>{activeOpportunities}</strong><span>of {opportunities.length} opportunities</span></div></div><div className="report-insight-grid"><div><small>Tracked measures</small><strong>{metrics.length}</strong><span>baseline and execution signals</span></div><div><small>Conversations</small><strong>{conversations.length}</strong><span>{sent} sent, replied, or won</span></div></div><div className="report-note"><strong>Next useful question</strong><p>Which research-backed experiment can Fired Arts run this month with a clear owner, safe scope, and result to log?</p></div></div>;
 }
 
-function SettingsView() {
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These controls describe the current local-first boundary and the brand defaults used by the workspace." /><div className="settings-list"><div><strong>Persistence</strong><span>Versioned browser storage · local-only</span><em>Active</em></div><div><strong>Publishing</strong><span>Manual copy/export workflow · no OAuth connections</span><em>Not connected</em></div><div><strong>Brand source</strong><span>Fired Arts Regional Growth HQ lockup</span><em>Canonical</em></div><div><strong>Location</strong><span>{studio.location} · 40-mile growth core</span><em>Working context</em></div></div></div>;
+function SettingsView({ onExportWorkspace, onResetWorkspace }) {
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These controls describe the current local-first boundary and the brand defaults used by the workspace." /><div className="settings-list"><div><strong>Persistence</strong><span>Versioned browser storage · local-only</span><em>Active</em></div><div><strong>Publishing</strong><span>Manual copy/export workflow · no OAuth connections</span><em>Not connected</em></div><div><strong>Brand source</strong><span>Fired Arts Regional Growth HQ lockup</span><em>Canonical</em></div><div><strong>Location</strong><span>{studio.location} · 40-mile growth core</span><em>Working context</em></div></div><section className="settings-actions"><div><strong>Workspace data</strong><span>Download the current local workspace before moving it or clearing this browser.</span></div><div className="settings-action-row"><button className="ink-button" onClick={onExportWorkspace}>Export workspace JSON <Arrow /></button>{confirmingReset ? <><span className="warning-note">This clears local campaigns, contacts, drafts, and metrics.</span><button className="primary-button" onClick={onResetWorkspace}>Confirm reset</button><button className="text-button" onClick={() => setConfirmingReset(false)}>Cancel</button></> : <button className="text-button danger-button" onClick={() => setConfirmingReset(true)}>Reset local workspace</button>}</div></section></div>;
 }
 
-function DetailDrawer({ item, onClose, onBuild, onStartConversation }) {
+function DetailDrawer({ item, onClose, onBuild, onStartConversation, onSaveTarget }) {
+  const [draft, setDraft] = useState(item);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setDraft(item); setSaved(false); }, [item]);
   if (!item) return null;
   const isOffer = Boolean(item.description);
   const isTarget = Boolean(item.segment);
-  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close detail">×</button><div className="eyebrow">{isOffer ? item.category : isTarget ? item.segment : "Selected item"}</div><h2>{isOffer ? item.title : item.name}</h2>{isOffer ? <><p className="drawer-lead">{item.description}</p><div className="drawer-meta"><span><small>Audience</small><strong>{item.audience}</strong></span><span><small>Status</small><strong>{item.status}</strong></span></div><div className="drawer-section"><small>First move</small><p>{item.firstStep}</p></div><button className="primary-button full" onClick={onBuild}>Build this offer <Arrow /></button></> : <><p className="drawer-lead">{item.offer || "A working target in the Fired Arts regional growth system."}</p><div className="drawer-meta"><span><small>Place</small><strong>{item.place || "Working set"}</strong></span><span><small>Relationship</small><strong>{item.relationshipStatus || item.status || "Review"}</strong></span></div><div className="drawer-contact-meta"><span><small>Contact path</small><strong>{item.contactName || "Name to verify"}</strong><em>{item.contactEmail || item.contactPhone || "Email or phone not recorded"}</em></span><span><small>Notes</small><strong>{item.notes || "Add context after the first research pass."}</strong></span></div><div className="drawer-section"><small>Why it matters</small><p>Reach the organizer early with a specific, low-friction first offer instead of a general flyer.</p></div><button className="primary-button full" onClick={() => onStartConversation(item)}>Start the conversation <Arrow /></button><button className="ink-button full" onClick={onClose}>Mark for follow-up <Arrow /></button></>}</aside></div>;
+  const form = draft || item;
+  const update = (field, value) => setDraft((current) => ({ ...(current || item), [field]: value }));
+  const saveTarget = () => { onSaveTarget({ ...item, ...form }); setSaved(true); };
+  const markForFollowUp = () => { onSaveTarget({ ...item, ...form, relationshipStatus: "Follow-up", nextFollowUpAt: form.nextFollowUpAt || new Date().toISOString().slice(0, 10) }); setSaved(true); };
+  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close detail">×</button><div className="eyebrow">{isOffer ? item.category : isTarget ? item.segment : "Selected item"}</div><h2>{isOffer ? item.title : item.name}</h2>{isOffer ? <><p className="drawer-lead">{item.description}</p><div className="drawer-meta"><span><small>Audience</small><strong>{item.audience}</strong></span><span><small>Status</small><strong>{item.status}</strong></span></div><div className="drawer-section"><small>First move</small><p>{item.firstStep}</p></div><button className="primary-button full" onClick={onBuild}>Build this offer <Arrow /></button></> : <><p className="drawer-lead">{item.offer || "A working target in the Fired Arts regional growth system."}</p><div className="drawer-meta"><span><small>Place</small><strong>{item.place || "Working set"}</strong></span><span><small>Relationship</small><strong>{form.relationshipStatus || form.status || "Review"}</strong></span></div><div className="drawer-contact-form"><label>Contact name<input value={form.contactName || ""} onChange={(event) => update("contactName", event.target.value)} placeholder="Add a verified contact" /></label><label>Email<input type="email" value={form.contactEmail || ""} onChange={(event) => update("contactEmail", event.target.value)} placeholder="name@organization.org" /></label><label>Phone<input value={form.contactPhone || ""} onChange={(event) => update("contactPhone", event.target.value)} placeholder="(765) 000-0000" /></label><label>Relationship<select value={form.relationshipStatus || "New"} onChange={(event) => update("relationshipStatus", event.target.value)}><option>New</option><option>Research</option><option>Follow-up</option><option>Active</option><option>Paused</option></select></label><label>Follow-up date<input type="date" value={form.nextFollowUpAt || ""} onChange={(event) => update("nextFollowUpAt", event.target.value)} /></label><label>Notes<textarea value={form.notes || ""} onChange={(event) => update("notes", event.target.value)} placeholder="Record permission, timing, or useful context." /></label></div><div className="drawer-section"><small>Why it matters</small><p>Reach the organizer early with a specific, low-friction first offer instead of a general flyer.</p></div><div className="modal-actions"><button className="primary-button" onClick={saveTarget}>Save contact <Arrow /></button><button className="ink-button" onClick={markForFollowUp}>Mark for follow-up <Arrow /></button></div>{saved && <span className="success-note">Saved locally.</span>}<button className="text-button full" onClick={() => onStartConversation({ ...item, ...form })}>Start the conversation <Arrow /></button></>}</aside></div>;
 }
 
-function BuilderModal({ offer, onClose }) {
+function BuilderModal({ offer, onClose, onSaveDraft }) {
   const [audience, setAudience] = useState(offer?.audience?.split(",")[0] || "Daycares");
+  const [message, setMessage] = useState(offer ? `Hi — Fired Arts would love to bring ${offer.title.toLowerCase()} to your group. ${offer.firstStep}.` : "");
   const [sent, setSent] = useState(false);
   if (!offer) return null;
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="builder-modal" role="dialog" aria-modal="true" aria-labelledby="builder-title" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close offer builder">×</button><div className="eyebrow">Offer builder</div><h2 id="builder-title">{offer.title}</h2><p>{offer.description}</p><label>Primary audience<select value={audience} onChange={(event) => setAudience(event.target.value)}><option>Daycares</option><option>Schools / PTOs</option><option>Homeschool groups</option><option>Churches / seniors</option><option>Adults / young professionals</option><option>Regional corporate</option></select></label><label>First message<textarea defaultValue={`Hi — Fired Arts would love to bring ${offer.title.toLowerCase()} to your group. ${offer.firstStep}.`} /></label><div className="modal-actions">{sent ? <span className="success-note">Saved to your offer queue.</span> : <button className="primary-button" onClick={() => setSent(true)}>Save offer draft <Arrow /></button>}<button className="text-button" onClick={onClose}>Cancel</button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="builder-modal" role="dialog" aria-modal="true" aria-labelledby="builder-title" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close offer builder">×</button><div className="eyebrow">Offer builder</div><h2 id="builder-title">{offer.title}</h2><p>{offer.description}</p><label>Primary audience<select value={audience} onChange={(event) => setAudience(event.target.value)}><option>Daycares</option><option>Schools / PTOs</option><option>Homeschool groups</option><option>Churches / seniors</option><option>Adults / young professionals</option><option>Regional corporate</option></select></label><label>First message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label><div className="modal-actions">{sent ? <span className="success-note">Saved to your offer queue.</span> : <button className="primary-button" onClick={() => { onSaveDraft({ offerId: offer.id, title: offer.title, audience, message }); setSent(true); }}>Save offer draft <Arrow /></button>}<button className="text-button" onClick={onClose}>Cancel</button></div></div></div>;
 }
+
+const defaultCoupon = {
+  title: "Fired Arts welcome-back offer",
+  code: "PICKUP10",
+  offer: "10% off the next studio visit",
+  terms: "One use per customer. Present this offer at the next visit. Confirm final terms before publishing.",
+};
 
 function App() {
   const [active, setActive] = useState("overview");
@@ -529,14 +574,18 @@ function App() {
   const [detail, setDetail] = useState(null);
   const [builder, setBuilder] = useState(null);
   const [completed, setCompleted] = useStoredState("checklist", {});
-  const [campaigns, setCampaigns] = useStoredState("campaigns", seedCampaigns);
+  const [campaigns, setCampaigns] = useStoredState("campaigns", seedCampaigns, normalizeCampaigns);
   const [conversations, setConversations] = useStoredState("conversations", seedConversations);
-  const [assets, setAssets] = useStoredState("assets", assetLibrary);
+  const [assets, setAssets] = useStoredState("assets", assetLibrary, normalizeAssets);
+  const [targets, setTargets] = useStoredState("outreach-targets", outreachTargets);
+  const [offerDrafts, setOfferDrafts] = useStoredState("offer-drafts", []);
+  const [coupon, setCoupon] = useStoredState("pickup-coupon", defaultCoupon);
   const [researchContent, setResearchContent] = useStoredState("research-content", researchContentSeed);
   const [opportunities, setOpportunities] = useStoredState("research-opportunities", researchOpportunitiesSeed);
   const [metrics, setMetrics] = useStoredState("research-metrics", researchMetricsSeed);
   const [decisions, setDecisions] = useStoredState("research-decisions", researchDecisionsSeed);
   const [campaignModal, setCampaignModal] = useState(false);
+  const [couponModal, setCouponModal] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useStoredState("selected-campaign", seedCampaigns[0].id);
 
   const toggleAction = (id) => setCompleted((current) => ({ ...current, [id]: !current[id] }));
@@ -544,6 +593,13 @@ function App() {
   const buildOffer = (offer = detail || offers[0]) => { setDetail(null); setBuilder(offer); };
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) || campaigns[0];
   const updateCampaign = (updated) => setCampaigns((current) => current.map((campaign) => campaign.id === updated.id ? updated : campaign));
+  const updateTarget = (updated) => setTargets((current) => current.map((target) => target.id === updated.id ? updated : target));
+  const removeAsset = (assetId) => { setAssets((current) => current.filter((asset) => asset.id !== assetId)); setCampaigns((current) => current.map((campaign) => ({ ...campaign, assetIds: normalizeAssetIds(campaign.assetIds).filter((id) => id !== assetId), variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds).filter((id) => id !== assetId) }])) }))); };
+  const saveOfferDraft = (draft) => setOfferDrafts((current) => [{ ...draft, id: makeId("offer-draft"), createdAt: new Date().toISOString().slice(0, 10) }, ...current]);
+  const copyCoupon = (value) => copyToClipboard(`${value.title}\nCode: ${value.code}\n${value.offer}\n${value.terms}`);
+  const exportCoupon = (value) => exportWorkspaceFile(`${value.code.toLowerCase()}-pickup-coupon.txt`, `${value.title}\n\nCode: ${value.code}\n${value.offer}\n\n${value.terms}\n`, "text/plain");
+  const exportWorkspace = () => exportWorkspaceFile("fired-arts-growth-hq-workspace.json", JSON.stringify({ ...readStoredWorkspace(), campaigns, conversations, assets, targets, offerDrafts, coupon, researchContent, opportunities, metrics, decisions }, null, 2));
+  const resetWorkspace = () => { clearStoredWorkspace(); window.location.reload(); };
   const openCampaign = (id) => { setSelectedCampaignId(id); setActive("social"); };
   const createCampaign = ({ title, audience, objective, offer, targetId }) => {
     const campaignId = makeId("campaign");
@@ -552,9 +608,9 @@ function App() {
       hook: `${offer.title}: ${offer.firstStep}.`,
       caption: `${offer.description} Fired Arts is building a welcoming local reason to visit in Kokomo.`,
       cta: "Plan your visit", hashtags: "#FiredArts #KokomoCreates #SupportLocal",
-      destinationUrl: "https://firedartsstudio.com/visit", assetIds: ["asset-glaze"], status: "Draft", scheduledAt: "",
+      destinationUrl: "https://firedartsstudio.com/visit", assetIds: [], status: "Draft", scheduledAt: "",
     }]));
-    const campaign = { id: campaignId, title, objective, offerId: offer.id, audience, keyMessage: offer.description, cta: "Plan your visit", destinationUrl: "https://firedartsstudio.com/visit", startDate: "", endDate: "", status: "Draft", platformIds, assetIds: ["asset-glaze"], targetIds: targetId ? [targetId] : [], variants };
+    const campaign = { id: campaignId, title, objective, offerId: offer.id, audience, keyMessage: offer.description, cta: "Plan your visit", destinationUrl: "https://firedartsstudio.com/visit", startDate: "", endDate: "", status: "Draft", platformIds, assetIds: [], targetIds: targetId ? [targetId] : [], variants };
     setCampaigns((current) => [campaign, ...current]);
     setSelectedCampaignId(campaignId);
     setCampaignModal(false);
@@ -623,25 +679,25 @@ function App() {
 
   const view = useMemo(() => {
     if (active === "campaigns") return <CampaignsView campaigns={campaigns} onOpen={openCampaign} onCreate={() => setCampaignModal(true)} />;
-    if (active === "social") return <SocialStudioView campaign={selectedCampaign} assets={assets} onChange={updateCampaign} onSave={() => updateCampaign({ ...selectedCampaign, status: "Draft" })} onExport={exportCampaign} onStartConversation={startConversation} onCreate={() => setCampaignModal(true)} onBack={() => setActive("campaigns")} />;
+    if (active === "social") return <SocialStudioView campaign={selectedCampaign} assets={assets} targets={targets} onChange={updateCampaign} onSave={() => updateCampaign({ ...selectedCampaign, status: "Draft" })} onExport={exportCampaign} onStartConversation={startConversation} onOpenAssets={() => setActive("assets")} onCreate={() => setCampaignModal(true)} onBack={() => setActive("campaigns")} />;
     if (active === "calendar") return <CalendarView campaigns={campaigns} onOpen={openCampaign} onChangeCampaign={updateCampaign} />;
-    if (active === "conversations") return <ConversationsView conversations={conversations} onChange={updateConversation} onStart={startConversation} onContact={() => setActive("contacts")} onLogActivity={logConversationActivity} />;
-    if (active === "contacts" || active === "outreach") return <OutreachView onTarget={setDetail} onExportPacket={exportOutreachPacket} />;
+    if (active === "conversations") return <ConversationsView conversations={conversations} targets={targets} onChange={updateConversation} onStart={startConversation} onContact={() => setActive("contacts")} onLogActivity={logConversationActivity} />;
+    if (active === "contacts" || active === "outreach") return <OutreachView targets={targets} onTarget={setDetail} onTargetChange={updateTarget} onExportPacket={exportOutreachPacket} />;
     if (active === "competitors") return <CompetitorsView />;
-    if (active === "offers") return <OffersView onOffer={openOffer} />;
-    if (active === "operations") return <OperationsView completed={completed} toggleAction={toggleAction} />;
+    if (active === "offers") return <OffersView onOffer={openOffer} offerDrafts={offerDrafts} />;
+    if (active === "operations") return <OperationsView completed={completed} toggleAction={toggleAction} coupon={coupon} onDraftCoupon={() => setCouponModal(true)} />;
     if (active === "research") return <ResearchView content={researchContent} onContentChange={(updated) => setResearchContent((current) => current.map((item) => item.id === updated.id ? updated : item))} onExport={exportResearchPacket} />;
     if (active === "opportunities") return <OpportunitiesView opportunities={opportunities} decisions={decisions} onOpportunityChange={(updated) => setOpportunities((current) => current.map((item) => item.id === updated.id ? updated : item))} onDecisionChange={(updated) => setDecisions((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
     if (active === "metrics") return <MetricsView metrics={metrics} onMetricChange={(updated) => setMetrics((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
-    if (active === "assets") return <AssetsView assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} />;
+    if (active === "assets") return <AssetsView assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} onRemoveAsset={removeAsset} />;
     if (active === "templates") return <TemplatesView onUse={useTemplate} />;
     if (active === "approvals") return <ApprovalsView campaigns={campaigns} onOpen={openCampaign} onApprove={(id) => { const campaign = campaigns.find((item) => item.id === id); if (campaign) updateCampaign({ ...campaign, status: "Approved", variants: Object.fromEntries(platformIds.map((platform) => [platform, { ...campaign.variants[platform], status: "Approved" }])) }); }} />;
     if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} researchContent={researchContent} opportunities={opportunities} metrics={metrics} />;
-    if (active === "settings") return <SettingsView />;
-    return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} setActive={setActive} />;
-  }, [active, assets, campaigns, completed, conversations, decisions, metrics, opportunities, range, researchContent, selectedCampaign]);
+    if (active === "settings") return <SettingsView onExportWorkspace={exportWorkspace} onResetWorkspace={resetWorkspace} />;
+    return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} setActive={setActive} />;
+  }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchContent, selectedCampaign, targets]);
 
-  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} /><CampaignModal open={campaignModal} offers={offers} targets={outreachTargets} onClose={() => setCampaignModal(false)} onSave={createCampaign} /></div>;
+  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
 }
 
 export default App;
