@@ -4,7 +4,21 @@ import { assetLibrary, competitors, contentTemplates, checklist, offers, outreac
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
 import { clearStoredWorkspace, copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, readStoredWorkspace, writeStoredValue } from "./storage";
 import { FireCreatorSuite } from "./fireCreatorSuite";
+import { AuthGate, signOutUser, useAuth } from "./auth.jsx";
 import "./styles.css";
+
+function FooterAuth() {
+  const { user } = useAuth();
+  if (!user?.email) return null;
+  return (
+    <span className="footer-auth">
+      {user.email} ·{" "}
+      <button className="text-button" type="button" onClick={signOutUser}>
+        Sign out
+      </button>
+    </span>
+  );
+}
 
 const navItems = [
   ["creator", "Fire Creator Suite", "spark"],
@@ -720,9 +734,9 @@ function App() {
     return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} setActive={setActive} />;
   }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchContent, selectedCampaign, targets]);
 
-  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
+  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span><FooterAuth /></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
 }
 
 export default App;
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<AuthGate><App /></AuthGate>);
