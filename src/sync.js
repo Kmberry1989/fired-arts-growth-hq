@@ -20,7 +20,7 @@ import { clearStoredWorkspace, readStoredValue, writeStoredValue } from "./stora
 
 // Shared workspace lives under hq/state/{key} in Firestore.
 // Only the two owner accounts can read/write (see firestore.rules).
-const STATE_DOC = (key) => doc(db, "hq", "state", key);
+const STATE_DOC = (key) => doc(db, "hq", key);
 const WRITE_DEBOUNCE_MS = 800;
 
 function stableStringify(value) {
@@ -186,7 +186,7 @@ export function stripInlineImages(assets) {
 export async function resetCloudWorkspace() {
   if (db && auth?.currentUser) {
     try {
-      const snap = await getDocs(collection(db, "hq", "state"));
+      const snap = await getDocs(collection(db, "hq"));
       await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
     } catch (err) {
       console.warn("[sync] cloud doc reset failed:", err);

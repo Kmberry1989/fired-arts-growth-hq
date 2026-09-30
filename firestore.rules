@@ -15,7 +15,7 @@ service cloud.firestore {
         ];
     }
 
-    // Shared workspace state lives under /hq/state/{key}.
+    // Shared workspace state lives under /hq/{key} (one document per state key).
     match /hq/{document=**} {
       allow read, write: if isOwner();
     }
