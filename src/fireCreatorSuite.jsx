@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { copyToClipboard, exportWorkspaceFile, readStoredValue, writeStoredValue } from "./storage";
+import { useMemo, useRef, useState } from "react";
+import { copyToClipboard, exportWorkspaceFile } from "./storage";
+import { useSyncedState } from "./sync.js";
 
 const suiteTabs = [
   ["dashboard", "Command center", "⌂"],
@@ -47,9 +48,7 @@ function creatorId(prefix) {
 }
 
 function useCreatorState(key, fallback) {
-  const [value, setValue] = useState(() => readStoredValue(`creator-suite-${key}`, fallback));
-  useEffect(() => writeStoredValue(`creator-suite-${key}`, value), [key, value]);
-  return [value, setValue];
+  return useSyncedState(`creator-suite-${key}`, fallback);
 }
 
 function CreatorButton({ children, onClick, secondary = false, disabled = false }) {

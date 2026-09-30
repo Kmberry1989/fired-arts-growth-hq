@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Fired Arts Regional Growth HQ — asset storage rules.
+// Only the two owner Google accounts may read or write uploaded images.
+// Deploy: Firebase console → Storage → Rules, or `firebase deploy --only storage`.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in [
+          "kylematthewberry@gmail.com",
+          "rochelleberry731@gmail.com"
+        ];
+    }
+
+    match /hq-assets/{allPaths=**} {
+      allow read, write: if isOwner();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

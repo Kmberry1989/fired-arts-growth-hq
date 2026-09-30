@@ -1,8 +1,17 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
-import { clearStoredWorkspace, copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredValue, readStoredWorkspace, writeStoredValue } from "./storage";
+import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredWorkspace } from "./storage";
+import {
+  deleteAssetFile,
+  resetCloudWorkspace,
+  stripInlineImages,
+  uploadAssetFile,
+  uploadDataUrlAsset,
+  useLocalState,
+  useSyncedState,
+} from "./sync.js";
 import { FireCreatorSuite } from "./fireCreatorSuite";
 import { AuthGate, signOutUser, useAuth } from "./auth.jsx";
 import "./styles.css";
@@ -106,12 +115,6 @@ function buildFirstContactDraft(target) {
   const subject = `${target.offer}: an idea for ${target.name}`;
   const body = `Hi ${target.name} team,\n\n${opening} Fired Arts Studio in Kokomo would love to explore a simple ${offer} idea with you.\n\nThe first version could be a low-friction pilot with a clear group experience, all-inclusive pottery pricing, and pieces ready for pickup after firing in about one week. We can shape the details around your schedule, audience, and permission process.\n\nWould you be the right person to talk with about a ${offer} opportunity in ${target.place}? If so, I’d be happy to send a one-page outline or find a short time to compare notes.\n\nWarmly,\nFired Arts Studio\n(765) 450-3088`;
   return { subject, body };
-}
-
-function useStoredState(key, fallback, normalize = (value) => value) {
-  const [value, setValue] = useState(() => normalize(readStoredValue(key, fallback)));
-  useEffect(() => writeStoredValue(key, value), [key, value]);
-  return [value, setValue];
 }
 
 function Arrow({ diagonal = false }) {
@@ -550,8 +553,27 @@ function ConversationsView({ conversations, targets, onChange, onStart, onContac
 function AssetsView({ assets, onAddAsset, onRemoveAsset }) {
   const [query, setQuery] = useState("");
   const filtered = assets.filter((asset) => `${asset.name} ${asset.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
-  const handleUpload = (event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => onAddAsset({ id: makeId("asset"), name: file.name, type: "Uploaded image", size: `${Math.round(file.size / 1024)} KB`, src: reader.result, tags: ["uploaded", "session"] }); reader.readAsDataURL(file); event.target.value = ""; };
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="Upload real studio or campaign images locally, then select them in Social Studio. The Fired Arts brand lockup remains available as a protected brand asset." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className="primary-button upload-button">Add local asset <Arrow /><input type="file" accept="image/*" onChange={handleUpload} /></label></div>{filtered.length ? <div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small><span>{asset.tags.join(" · ")}</span><button className="text-button asset-remove" disabled={asset.type === "Brand"} onClick={() => onRemoveAsset(asset.id)}>{asset.type === "Brand" ? "Brand asset" : "Remove asset"}</button></div></article>)}</div> : <div className="empty-state asset-empty-state">No assets match this search. Upload a real Fired Arts image to use it in a campaign.</div>}</div>;
+  const [uploading, setUploading] = useState(false);
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const assetId = makeId("asset");
+    const meta = { id: assetId, name: file.name, type: "Uploaded image", size: `${Math.round(file.size / 1024)} KB`, tags: ["uploaded", "session"] };
+    setUploading(true);
+    try {
+      const { url, path } = await uploadAssetFile(file, assetId);
+      onAddAsset({ ...meta, src: url, storagePath: path });
+    } catch (err) {
+      console.warn("Cloud upload failed, keeping a local copy:", err);
+      const reader = new FileReader();
+      reader.onload = () => onAddAsset({ ...meta, src: reader.result });
+      reader.readAsDataURL(file);
+    } finally {
+      setUploading(false);
+    }
+  };
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="Upload real studio or campaign images to the shared library, then select them in Social Studio. The Fired Arts brand lockup remains available as a protected brand asset." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className={`primary-button upload-button${uploading ? " is-busy" : ""}`}>{uploading ? "Uploading…" : <span>Add shared asset <Arrow /></span>}<input type="file" accept="image/*" onChange={handleUpload} disabled={uploading} /></label></div>{filtered.length ? <div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small><span>{asset.tags.join(" · ")}</span><button className="text-button asset-remove" disabled={asset.type === "Brand"} onClick={() => onRemoveAsset(asset.id)}>{asset.type === "Brand" ? "Brand asset" : "Remove asset"}</button></div></article>)}</div> : <div className="empty-state asset-empty-state">No assets match this search. Upload a real Fired Arts image to use it in a campaign.</div>}</div>;
 }
 
 function TemplatesView({ onUse }) {
@@ -572,7 +594,7 @@ function ReportsView({ campaigns, conversations, researchContent, opportunities,
 
 function SettingsView({ onExportWorkspace, onResetWorkspace }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These controls describe the current local-first boundary and the brand defaults used by the workspace." /><div className="settings-list"><div><strong>Persistence</strong><span>Versioned browser storage · local-only</span><em>Active</em></div><div><strong>Publishing</strong><span>Manual copy/export workflow · no OAuth connections</span><em>Not connected</em></div><div><strong>Brand source</strong><span>Fired Arts Regional Growth HQ lockup</span><em>Canonical</em></div><div><strong>Location</strong><span>{studio.location} · 40-mile growth core</span><em>Working context</em></div></div><section className="settings-actions"><div><strong>Workspace data</strong><span>Download the current local workspace before moving it or clearing this browser.</span></div><div className="settings-action-row"><button className="ink-button" onClick={onExportWorkspace}>Export workspace JSON <Arrow /></button>{confirmingReset ? <><span className="warning-note">This clears local campaigns, contacts, drafts, and metrics.</span><button className="primary-button" onClick={onResetWorkspace}>Confirm reset</button><button className="text-button" onClick={() => setConfirmingReset(false)}>Cancel</button></> : <button className="text-button danger-button" onClick={() => setConfirmingReset(true)}>Reset local workspace</button>}</div></section></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These controls describe the shared workspace boundary and the brand defaults used by the workspace." /><div className="settings-list"><div><strong>Persistence</strong><span>Cloud workspace · shared live between owners</span><em>Active</em></div><div><strong>Publishing</strong><span>Manual copy/export workflow · no OAuth connections</span><em>Not connected</em></div><div><strong>Brand source</strong><span>Fired Arts Regional Growth HQ lockup</span><em>Canonical</em></div><div><strong>Location</strong><span>{studio.location} · 40-mile growth core</span><em>Working context</em></div></div><section className="settings-actions"><div><strong>Workspace data</strong><span>Download the current local workspace before moving it or clearing this browser.</span></div><div className="settings-action-row"><button className="ink-button" onClick={onExportWorkspace}>Export workspace JSON <Arrow /></button>{confirmingReset ? <><span className="warning-note">This clears local campaigns, contacts, drafts, and metrics.</span><button className="primary-button" onClick={onResetWorkspace}>Confirm reset</button><button className="text-button" onClick={() => setConfirmingReset(false)}>Cancel</button></> : <button className="text-button danger-button" onClick={() => setConfirmingReset(true)}>Reset local workspace</button>}</div></section></div>;
 }
 
 function DetailDrawer({ item, onClose, onBuild, onStartConversation, onSaveTarget }) {
@@ -609,20 +631,20 @@ function App() {
   const [range, setRange] = useState("Now");
   const [detail, setDetail] = useState(null);
   const [builder, setBuilder] = useState(null);
-  const [completed, setCompleted] = useStoredState("checklist", {});
-  const [campaigns, setCampaigns] = useStoredState("campaigns", seedCampaigns, normalizeCampaigns);
-  const [conversations, setConversations] = useStoredState("conversations", seedConversations);
-  const [assets, setAssets] = useStoredState("assets", assetLibrary, normalizeAssets);
-  const [targets, setTargets] = useStoredState("outreach-targets", outreachTargets);
-  const [offerDrafts, setOfferDrafts] = useStoredState("offer-drafts", []);
-  const [coupon, setCoupon] = useStoredState("pickup-coupon", defaultCoupon);
-  const [researchContent, setResearchContent] = useStoredState("research-content", researchContentSeed);
-  const [opportunities, setOpportunities] = useStoredState("research-opportunities", researchOpportunitiesSeed);
-  const [metrics, setMetrics] = useStoredState("research-metrics", researchMetricsSeed);
-  const [decisions, setDecisions] = useStoredState("research-decisions", researchDecisionsSeed);
+  const [completed, setCompleted] = useSyncedState("checklist", {});
+  const [campaigns, setCampaigns] = useSyncedState("campaigns", seedCampaigns, normalizeCampaigns);
+  const [conversations, setConversations] = useSyncedState("conversations", seedConversations);
+  const [assets, setAssets] = useSyncedState("assets", assetLibrary, normalizeAssets, stripInlineImages);
+  const [targets, setTargets] = useSyncedState("outreach-targets", outreachTargets);
+  const [offerDrafts, setOfferDrafts] = useSyncedState("offer-drafts", []);
+  const [coupon, setCoupon] = useSyncedState("pickup-coupon", defaultCoupon);
+  const [researchContent, setResearchContent] = useSyncedState("research-content", researchContentSeed);
+  const [opportunities, setOpportunities] = useSyncedState("research-opportunities", researchOpportunitiesSeed);
+  const [metrics, setMetrics] = useSyncedState("research-metrics", researchMetricsSeed);
+  const [decisions, setDecisions] = useSyncedState("research-decisions", researchDecisionsSeed);
   const [campaignModal, setCampaignModal] = useState(false);
   const [couponModal, setCouponModal] = useState(false);
-  const [selectedCampaignId, setSelectedCampaignId] = useStoredState("selected-campaign", seedCampaigns[0].id);
+  const [selectedCampaignId, setSelectedCampaignId] = useLocalState("selected-campaign", seedCampaigns[0].id);
 
   const toggleAction = (id) => setCompleted((current) => ({ ...current, [id]: !current[id] }));
   const openOffer = (offer) => setDetail(offer);
@@ -630,12 +652,37 @@ function App() {
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) || campaigns[0];
   const updateCampaign = (updated) => setCampaigns((current) => current.map((campaign) => campaign.id === updated.id ? updated : campaign));
   const updateTarget = (updated) => setTargets((current) => current.map((target) => target.id === updated.id ? updated : target));
-  const removeAsset = (assetId) => { setAssets((current) => current.filter((asset) => asset.id !== assetId)); setCampaigns((current) => current.map((campaign) => ({ ...campaign, assetIds: normalizeAssetIds(campaign.assetIds).filter((id) => id !== assetId), variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds).filter((id) => id !== assetId) }])) }))); };
+  const removeAsset = (assetId) => {
+    const asset = assets.find((item) => item.id === assetId);
+    if (asset?.storagePath) deleteAssetFile(asset.storagePath);
+    setAssets((current) => current.filter((asset) => asset.id !== assetId)); setCampaigns((current) => current.map((campaign) => ({ ...campaign, assetIds: normalizeAssetIds(campaign.assetIds).filter((id) => id !== assetId), variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds).filter((id) => id !== assetId) }])) })));
+  };
+  // Migrate any legacy inline (data-URL) images to shared cloud storage once.
+  const migratingAssetsRef = useRef(null);
+  if (!migratingAssetsRef.current) migratingAssetsRef.current = new Set();
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!user?.email) return;
+    const pending = assets.filter((asset) => typeof asset?.src === "string" && asset.src.startsWith("data:") && !migratingAssetsRef.current.has(asset.id));
+    if (!pending.length) return;
+    pending.forEach((asset) => migratingAssetsRef.current.add(asset.id));
+    (async () => {
+      for (const asset of pending) {
+        try {
+          const { url, path } = await uploadDataUrlAsset(asset.src, asset.id, asset.name);
+          setAssets((current) => current.map((item) => item.id === asset.id ? { ...item, src: url, storagePath: path } : item));
+        } catch (err) {
+          console.warn("Asset migration failed for", asset.id, err);
+          migratingAssetsRef.current.delete(asset.id);
+        }
+      }
+    })();
+  }, [assets, user]);
   const saveOfferDraft = (draft) => setOfferDrafts((current) => [{ ...draft, id: makeId("offer-draft"), createdAt: new Date().toISOString().slice(0, 10) }, ...current]);
   const copyCoupon = (value) => copyToClipboard(`${value.title}\nCode: ${value.code}\n${value.offer}\n${value.terms}`);
   const exportCoupon = (value) => exportWorkspaceFile(`${value.code.toLowerCase()}-pickup-coupon.txt`, `${value.title}\n\nCode: ${value.code}\n${value.offer}\n\n${value.terms}\n`, "text/plain");
   const exportWorkspace = () => exportWorkspaceFile("fired-arts-growth-hq-workspace.json", JSON.stringify({ ...readStoredWorkspace(), campaigns, conversations, assets, targets, offerDrafts, coupon, researchContent, opportunities, metrics, decisions }, null, 2));
-  const resetWorkspace = () => { clearStoredWorkspace(); window.location.reload(); };
+  const resetWorkspace = async () => { await resetCloudWorkspace(); window.location.reload(); };
   const openCampaign = (id) => { setSelectedCampaignId(id); setActive("social"); };
   const createCampaign = ({ title, audience, objective, offer, targetId }) => {
     const campaignId = makeId("campaign");
@@ -734,7 +781,7 @@ function App() {
     return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} setActive={setActive} />;
   }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchContent, selectedCampaign, targets]);
 
-  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Local-first growth workspace · publishing and messaging remain manual</span><FooterAuth /></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
+  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Shared growth workspace · synced live between owners · publishing and messaging remain manual</span><FooterAuth /></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
 }
 
 export default App;

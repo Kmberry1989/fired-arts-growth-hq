@@ -8,6 +8,8 @@ import {
   signInWithRedirect,
   signOut,
 } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 // Only these Google accounts may open the workspace.
 const ALLOWED_EMAILS = ["kylematthewberry@gmail.com", "rochelleberry731@gmail.com"];
@@ -23,9 +25,16 @@ const firebaseConfig = {
 
 const configured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 let auth = null;
+let db = null;
+let storage = null;
 if (configured) {
-  auth = getAuth(initializeApp(firebaseConfig));
+  const app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  storage = getStorage(app);
 }
+
+export { auth, db, storage };
 
 const AuthContext = createContext({ user: null, state: "checking" });
 export const useAuth = () => useContext(AuthContext);
