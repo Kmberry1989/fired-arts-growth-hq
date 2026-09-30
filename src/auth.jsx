@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { Component, createContext, useContext, useEffect, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
@@ -27,14 +27,63 @@ const configured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 let auth = null;
 let db = null;
 let storage = null;
+let initError = "";
 if (configured) {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  storage = getStorage(app);
+  try {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    try {
+      db = getFirestore(app);
+    } catch (dbError) {
+      initError = `Cloud database unavailable: ${dbError?.message || dbError}`;
+    }
+    try {
+      storage = getStorage(app);
+    } catch (storageError) {
+      initError = `Cloud file storage unavailable: ${storageError?.message || storageError}`;
+    }
+  } catch (error) {
+    initError = `Workspace services failed to start: ${error?.message || error}`;
+    auth = null;
+    db = null;
+    storage = null;
+  }
 }
 
-export { auth, db, storage };
+export { auth, db, storage, initError };
+
+// Catches any render/effect crash and shows it instead of a blank page.
+export class WorkspaceErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    console.error("Workspace crashed:", error);
+  }
+  render() {
+    if (this.state.error) {
+      const message = this.state.error?.message || String(this.state.error);
+      return (
+        <div className="auth-screen">
+          <div className="auth-card">
+            <p className="auth-eyebrow">Fired Arts Studio · Kokomo, Indiana</p>
+            <h1>Regional Growth HQ</h1>
+            <p className="auth-note">The workspace hit a startup problem and stopped instead of showing a blank page.</p>
+            <p className="auth-error">{message}</p>
+            <button className="primary-button" type="button" onClick={() => window.location.reload()}>
+              Reload workspace
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const AuthContext = createContext({ user: null, state: "checking" });
 export const useAuth = () => useContext(AuthContext);

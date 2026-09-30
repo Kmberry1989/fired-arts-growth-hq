@@ -13,7 +13,7 @@ import {
   useSyncedState,
 } from "./sync.js";
 import { FireCreatorSuite } from "./fireCreatorSuite";
-import { AuthGate, signOutUser, useAuth } from "./auth.jsx";
+import { AuthGate, WorkspaceErrorBoundary, signOutUser, useAuth } from "./auth.jsx";
 import "./styles.css";
 
 function FooterAuth() {
@@ -786,4 +786,10 @@ function App() {
 
 export default App;
 
-createRoot(document.getElementById("root")).render(<AuthGate><App /></AuthGate>);
+createRoot(document.getElementById("root")).render(
+  <WorkspaceErrorBoundary>
+    <AuthGate>
+      <App />
+    </AuthGate>
+  </WorkspaceErrorBoundary>
+);
