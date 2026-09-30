@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
+import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, software, studio } from "./data";
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
 import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredWorkspace } from "./storage";
 import {
@@ -71,7 +71,7 @@ function normalizeAssets(value) {
 }
 
 function normalizeCampaigns(value) {
-  if (!Array.isArray(value)) return seedCampaigns;
+  if (!Array.isArray(value)) return [];
   return value.map((campaign) => ({
     ...campaign,
     assetIds: normalizeAssetIds(campaign.assetIds),
@@ -504,7 +504,7 @@ function CampaignsView({ campaigns, onOpen, onCreate }) {
   return <div className="view-content workspace-view">
     <SectionTitle eyebrow="Marketing workspace" title="Give every good idea a place to go." text="Campaigns turn a Fired Arts offer into a brief, a platform-ready content set, a calendar slot, and a reason to start a local conversation." action="New campaign" onAction={onCreate} />
     <div className="workspace-summary"><div><small>Active campaigns</small><strong>{campaigns.length}</strong></div><div><small>Platform variants</small><strong>{campaigns.length * platformIds.length}</strong></div><div><small>Needs review</small><strong>{campaigns.filter((campaign) => campaign.status === "Review").length}</strong></div><div><small>Local-first workflow</small><strong>Ready</strong></div></div>
-    <div className="campaign-list">{campaigns.map((campaign) => <button className="campaign-list-row" key={campaign.id} onClick={() => onOpen(campaign.id)}><span className="campaign-status-dot" /><span><strong>{campaign.title}</strong><small>{campaign.audience} · {campaign.startDate || "No date set"}</small></span><span className="campaign-platforms">{campaign.platformIds.map((id) => <i key={id} className={id}>{platformGuidance[id].icon}</i>)}</span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><Arrow /></button>)}</div>
+    <div className="campaign-list">{campaigns.length === 0 ? <div className="empty-state"><strong>No campaigns yet.</strong><span>Create your first campaign to turn a Fired Arts offer into platform-ready content.</span></div> : campaigns.map((campaign) => <button className="campaign-list-row" key={campaign.id} onClick={() => onOpen(campaign.id)}><span className="campaign-status-dot" /><span><strong>{campaign.title}</strong><small>{campaign.audience} · {campaign.startDate || "No date set"}</small></span><span className="campaign-platforms">{campaign.platformIds.map((id) => <i key={id} className={id}>{platformGuidance[id].icon}</i>)}</span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><Arrow /></button>)}</div>
   </div>;
 }
 
@@ -632,8 +632,8 @@ function App() {
   const [detail, setDetail] = useState(null);
   const [builder, setBuilder] = useState(null);
   const [completed, setCompleted] = useSyncedState("checklist", {});
-  const [campaigns, setCampaigns] = useSyncedState("campaigns", seedCampaigns, normalizeCampaigns);
-  const [conversations, setConversations] = useSyncedState("conversations", seedConversations);
+  const [campaigns, setCampaigns] = useSyncedState("campaigns", [], normalizeCampaigns);
+  const [conversations, setConversations] = useSyncedState("conversations", []);
   const [assets, setAssets] = useSyncedState("assets", assetLibrary, normalizeAssets, stripInlineImages);
   const [targets, setTargets] = useSyncedState("outreach-targets", outreachTargets);
   const [offerDrafts, setOfferDrafts] = useSyncedState("offer-drafts", []);
@@ -644,7 +644,7 @@ function App() {
   const [decisions, setDecisions] = useSyncedState("research-decisions", researchDecisionsSeed);
   const [campaignModal, setCampaignModal] = useState(false);
   const [couponModal, setCouponModal] = useState(false);
-  const [selectedCampaignId, setSelectedCampaignId] = useLocalState("selected-campaign", seedCampaigns[0].id);
+  const [selectedCampaignId, setSelectedCampaignId] = useLocalState("selected-campaign", "");
 
   const toggleAction = (id) => setCompleted((current) => ({ ...current, [id]: !current[id] }));
   const openOffer = (offer) => setDetail(offer);
