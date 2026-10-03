@@ -1,13 +1,33 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useState } from "react";
-import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, seedCampaigns, seedConversations, software, studio } from "./data";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { assetLibrary, competitors, contentTemplates, checklist, offers, outreachTargets, platformGuidance, software, studio } from "./data";
 import { evidenceStatuses, pricingBenchmark, researchContent as researchContentSeed, researchDecisions as researchDecisionsSeed, researchMetrics as researchMetricsSeed, researchOpportunities as researchOpportunitiesSeed, researchSources, socialBenchmark, topPosts } from "./researchData";
-import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip } from "./storage";
+import { copyToClipboard, exportWorkspaceFile, exportWorkspaceZip, readStoredWorkspace } from "./storage";
+import {
+  deleteAssetFile,
+  resetCloudWorkspace,
+  stripInlineImages,
+  uploadAssetFile,
+  uploadDataUrlAsset,
+  useLocalState,
+  useSyncedState,
+} from "./sync.js";
 import { FireCreatorSuite } from "./fireCreatorSuite";
-import { ProductionGate } from "./ProductionGate";
-import { callAuthenticatedApi, uploadAssetFile, useCloudCollection } from "./firebaseRest";
-import { buildResearchArchive } from "./archive";
+import { AuthGate, WorkspaceErrorBoundary, signOutUser, useAuth } from "./auth.jsx";
 import "./styles.css";
+
+function FooterAuth() {
+  const { user } = useAuth();
+  if (!user?.email) return null;
+  return (
+    <span className="footer-auth">
+      {user.email} ·{" "}
+      <button className="text-button" type="button" onClick={signOutUser}>
+        Sign out
+      </button>
+    </span>
+  );
+}
 
 const navItems = [
   ["creator", "Fire Creator Suite", "spark"],
@@ -27,7 +47,6 @@ const navItems = [
   ["templates", "Templates", "templates"],
   ["approvals", "Approvals", "approvals"],
   ["reports", "Reports", "reports"],
-  ["connections", "Connections", "operations"],
   ["settings", "Settings", "settings"],
 ];
 
@@ -36,7 +55,7 @@ const navGroups = [
   { label: "Growth engine", ids: ["overview", "campaigns", "social", "calendar"] },
   { label: "Relationships", ids: ["conversations", "contacts"] },
   { label: "Strategy", ids: ["competitors", "offers", "operations", "research", "opportunities", "metrics"] },
-  { label: "Library", ids: ["assets", "templates", "approvals", "reports", "connections", "settings"] },
+  { label: "Library", ids: ["assets", "templates", "approvals", "reports", "settings"] },
 ];
 
 const platformIds = Object.keys(platformGuidance);
@@ -52,7 +71,7 @@ function normalizeAssets(value) {
 }
 
 function normalizeCampaigns(value) {
-  if (!Array.isArray(value)) return seedCampaigns;
+  if (!Array.isArray(value)) return [];
   return value.map((campaign) => ({
     ...campaign,
     assetIds: normalizeAssetIds(campaign.assetIds),
@@ -144,16 +163,14 @@ function Sidebar({ active, setActive }) {
   );
 }
 
-function TopBar({ active, onBuild, syncStatus, ownerEmail, onSignOut }) {
+function TopBar({ active, onBuild }) {
   const title = navItems.find(([id]) => id === active)?.[1] || "Overview";
   return (
     <header className="topbar">
       <div className="breadcrumb"><span>Fired Arts</span><span className="slash">/</span><strong>{title}</strong></div>
       <div className="topbar-actions">
-        <span className={`sync-indicator ${syncStatus}`}>{syncStatus === "synced" ? "Cloud synced" : syncStatus === "saving" ? "Saving…" : syncStatus === "offline" ? "Recovery copy saved" : "Connecting…"}</span>
-        <span className="date-stamp">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date())}</span>
+        <span className="date-stamp">Research system · 12 Aug 2026</span>
         <button className="primary-button" onClick={onBuild}>New campaign <Arrow /></button>
-        <button className="text-button" onClick={onSignOut} aria-label={`Sign out ${ownerEmail}`}>Sign out</button>
       </div>
     </header>
   );
@@ -172,12 +189,12 @@ function SectionTitle({ eyebrow, title, text, action, onAction }) {
   );
 }
 
-function MetricStrip({ campaigns = [], targets = [], conversations = [], assets = [] }) {
+function MetricStrip() {
   const metrics = [
-    ["Live campaigns", campaigns.length, "Operational records", "blue"],
-    ["Verified contacts", targets.filter((item) => item.verificationStatus === "verified").length, "Confirmed contact paths", "red"],
-    ["Conversations", conversations.length, "Live outreach records", "green"],
-    ["Cloud assets", assets.length, "Available for campaigns", "yellow"],
+    ["Outreach targets", studio.stats.outreach, "Across the working database", "blue"],
+    ["PYOP radius", `${studio.stats.radius}`, "Studios / locations tracked", "red"],
+    ["Ready to approach", studio.stats.ready, "Contact paths verified", "green"],
+    ["Pickup loop", "1 wk", "Ready · held 60 days", "yellow"],
   ];
   return (
     <div className="metric-strip">
@@ -270,7 +287,7 @@ function Timeline() {
   );
 }
 
-function Overview({ range, setRange, onBuild, onOffer, onTarget, targets, campaigns, conversations, assets, setActive }) {
+function Overview({ range, setRange, onBuild, onOffer, onTarget, targets, setActive }) {
   const rangeCopy = {
     Now: ["This week: turn research into first conversations.", "Prioritize verification, pickup retention, and the first mobile kit."],
     "30 days": ["30 days: make the system repeatable.", "Package the offers, publish the booking path, and test one regional partner."],
@@ -293,7 +310,7 @@ function Overview({ range, setRange, onBuild, onOffer, onTarget, targets, campai
         </button>
       </section>
 
-      <MetricStrip campaigns={campaigns} targets={targets} conversations={conversations} assets={assets} />
+      <MetricStrip />
 
       <section className="split-grid">
         <div className="panel outreach-panel">
@@ -343,7 +360,7 @@ function OutreachView({ targets, onTarget, onTargetChange, onExportPacket }) {
   const toggleFiltered = () => setSelectedIds((current) => allFilteredSelected ? current.filter((id) => !filteredIds.includes(id)) : [...new Set([...current, ...filteredIds])]);
   return (
     <div className="view-content">
-      <SectionTitle eyebrow="Live contact database" title="Start with a verified person and purpose." text="Only contacts saved by the owner appear here. Research leads remain in the read-only archive until verified." action="Add contact" onAction={() => onTarget({ id: makeId("contact"), name: "", segment: "Uncategorized", place: "", status: "New", offer: "", priority: 1, verificationStatus: "unverified", contactName: "", contactEmail: "", contactPhone: "", notes: "" })} />
+      <SectionTitle eyebrow="Regional contact database" title="Target the planners before they book the default." text="A 40-mile outreach system for schools, daycares, homeschool groups, scouts, churches, chambers, senior activities, and regional team-building buyers." />
       <div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search organizations, segments, offers" /><FilterBar options={filters} value={filter} onChange={setFilter} /></div>
       <section className={`outreach-packet ${selectedTargets.length ? "has-selection" : ""}`} aria-label="Outreach packet export">
         <div><span className="eyebrow">Outreach packet</span><strong>{selectedTargets.length ? `${selectedTargets.length} target${selectedTargets.length === 1 ? "" : "s"} selected` : "Build a focused first-contact packet"}</strong><small>{selectedTargets.length ? "A CSV index plus one matched draft per target." : "Select filtered targets below to prepare a CSV and individualized drafts."}</small></div>
@@ -353,7 +370,7 @@ function OutreachView({ targets, onTarget, onTargetChange, onExportPacket }) {
         <div className="data-head"><label className="select-all"><input type="checkbox" checked={allFilteredSelected} onChange={toggleFiltered} aria-label="Select all filtered outreach targets" /><span /></label><span>Organization</span><span>Segment</span><span>Place</span><span>First offer</span><span>Status</span></div>
         {filtered.map((row) => <div className={`data-row outreach-data-row ${selectedIds.includes(row.id) ? "selected" : ""}`} key={row.name}><label className="target-checkbox"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => toggleTarget(row.id)} aria-label={`Select ${row.name}`} /><span /></label><button className="outreach-row-open" onClick={() => onTarget(row)}><span><strong>{row.name}</strong><small>Priority {row.priority}/5</small></span><span>{row.segment}</span><span>{row.place}</span><span>{row.offer}</span><span className={`status ${row.status.includes("Ready") ? "ready" : row.status.includes("Verify") ? "verify" : "new"}`}>{row.status}<Arrow /></span></button></div>)}
       </div>
-      <div className="view-footer"><span>Showing {filtered.length} live contacts</span><span>{selectedTargets.length ? `${selectedTargets.length} queued for export` : "Select contacts to export"} · {targets.filter((item) => item.verificationStatus !== "verified").length} need verification</span></div>
+      <div className="view-footer"><span>Showing {filtered.length} working targets · database total {studio.stats.outreach}</span><span>{selectedTargets.length ? `${selectedTargets.length} queued for export` : "Select targets to export"} · 27 rows still need verification</span></div>
     </div>
   );
 }
@@ -404,7 +421,7 @@ function ResearchView({ content, onContentChange, onExport }) {
       {tab === "sources" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search sources and topics" /><FilterBar options={evidenceStatuses} value={filter} onChange={setFilter} /></div><div className="source-grid">{sourceFiltered.map((source) => <article className="source-card" key={source.id}><div className="source-card-head"><span className="source-type">{source.type}</span><SourcePill value={source.evidenceStatus} /></div><h3>{source.topic}</h3><p>{source.note}</p><small>{source.fileName}</small><SourceFileActions fileName={source.fileName} /></article>)}</div></>}
       {tab === "files" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search original files" /><FilterBar options={evidenceStatuses} value={filter} onChange={setFilter} /></div><div className="source-file-library">{sourceFiltered.map((source) => <article className="source-file-card" key={source.id}><div className="source-card-head"><span className="source-type">{source.type}</span><SourcePill value={source.evidenceStatus} /></div><h3>{source.fileName}</h3><p>{source.topic} · {source.note}</p><SourceFileActions fileName={source.fileName} /></article>)}</div></>}
       {tab === "benchmarks" && <div className="research-benchmark-stack"><div><div className="research-section-heading"><div><span className="eyebrow">Pricing comparison</span><h3>What nearby studios make easy to understand</h3></div><small>{pricingBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Location</span><span>Fee model</span><span>Workshop / promotion</span><span>Use in planning</span></div>{pricingBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{sourceFor(row.sourceId).fileName}</small></span><span>{row.location}</span><span>{row.feeModel}</span><span>{row.workshop}<br /><small>{row.promotion}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Social comparison</span><h3>Use competitor observations as test prompts</h3></div><small>{socialBenchmark.length} rows · source only</small></div><div className="research-table data-table"><div className="data-head"><span>Studio</span><span>Audience</span><span>Activity</span><span>Best format</span><span>Test prompt</span></div>{socialBenchmark.map((row) => <div className="data-row static" key={row.id}><span><strong>{row.studio}</strong><small>{row.followers.toLocaleString()} followers · {row.avgLikes} avg likes</small></span><span>{row.platform}</span><span>{row.postsPerWeek}<br /><small>{row.bestTime}</small></span><span>{row.bestFormat}<br /><small>Most posted: {row.mostPosted}</small></span><span>{row.implication}</span></div>)}</div></div><div><div className="research-section-heading"><div><span className="eyebrow">Observed top posts</span><h3>Examples worth studying, not copying blindly</h3></div><small>{topPosts.length} rows</small></div><div className="top-post-grid">{topPosts.map((post) => <article className="top-post-card" key={post.id}><SourcePill value="Source only" /><strong>{post.studio}</strong><span>{post.format} · {post.likes} likes · {post.comments} comments</span><p>{post.theme}</p></article>)}</div></div></div>}
-      {tab === "content" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search content, visuals, CTAs" /><FilterBar options={["All", "Draft", "Ready", "Published", "Results logged"]} value={contentFilter} onChange={setContentFilter} /></div><div className="research-table data-table content-research-table"><div className="data-head"><span>Date</span><span>Channel</span><span>Format / visual</span><span>CTA</span><span>Status</span></div>{contentFiltered.map((item) => <div className="data-row" key={item.id}><span><strong>{item.date}</strong><small>{item.time}</small></span><span>{item.channel}</span><span><strong>{item.format}</strong><small>{item.asset}</small></span><span>{item.cta}</span><span><SourcePill value={item.status} /><small>{sourceFor(item.sourceId).fileName}</small></span></div>)}</div></>}
+      {tab === "content" && <><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search content, visuals, CTAs" /><FilterBar options={["All", "Draft", "Ready", "Published", "Results logged"]} value={contentFilter} onChange={setContentFilter} /></div><div className="research-table data-table content-research-table"><div className="data-head"><span>Date</span><span>Channel</span><span>Format / visual</span><span>CTA</span><span>Status</span></div>{contentFiltered.map((item) => <div className="data-row" key={item.id}><span><strong>{item.date}</strong><small>{item.time}</small></span><span>{item.channel}</span><span><strong>{item.format}</strong><small>{item.asset}</small></span><span>{item.cta}</span><span><select value={item.status} onChange={(event) => onContentChange({ ...item, status: event.target.value })}><option>Draft</option><option>Ready</option><option>Published</option><option>Results logged</option></select><small>{sourceFor(item.sourceId).fileName}</small></span></div>)}</div></>}
     </div>
   );
 }
@@ -413,12 +430,12 @@ function OpportunitiesView({ opportunities, decisions, onOpportunityChange, onDe
   const [filter, setFilter] = useState("All");
   const filtered = opportunities.filter((item) => filter === "All" || item.status === filter || item.category === filter);
   const filters = ["All", "Ready", "Build", "Validate", "Research", "Parked", "Marketing experiment", "Product experiment"];
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Opportunities and guardrails" title="Make the next experiment small enough to learn from." text="Conversation-derived process ideas remain hypotheses until equipment, safety, labor, cost, and product fit are validated." /><FilterBar options={filters} value={filter} onChange={setFilter} /><div className="opportunity-list">{filtered.map((item) => <article className="opportunity-card" key={item.id}><div className="opportunity-card-head"><div><span className="eyebrow">{item.category}</span><h3>{item.title}</h3></div><SourcePill value={item.evidenceStatus} /></div><div className="opportunity-meta"><span><small>Fit</small><strong>{item.fit}</strong></span><span><small>Risk</small><strong>{item.risk}</strong></span><span><small>Owner</small><strong>{item.owner}</strong></span><span><small>Archived status</small><strong>{item.status}</strong></span></div><p><strong>Next test:</strong> {item.nextTest}</p><p className="opportunity-success"><strong>Success signal:</strong> {item.successMetric}</p><small className="source-line">Sources: {item.sourceIds.map((sourceId) => sourceFor(sourceId).fileName).join(" · ")}</small></article>)}</div><section className="decision-log"><div className="research-section-heading"><div><span className="eyebrow">Decision log</span><h3>Keep open questions visible</h3></div><small>Only explicit decisions become policy.</small></div>{decisions.map((decision) => <div className="decision-row" key={decision.id}><span><strong>{decision.question}</strong><small>{decision.decision}</small></span><span><small>Archived status</small><strong>{decision.status}</strong></span><span className="decision-due">{decision.due}</span></div>)}</section></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Opportunities and guardrails" title="Make the next experiment small enough to learn from." text="Conversation-derived process ideas remain hypotheses until equipment, safety, labor, cost, and product fit are validated." /><FilterBar options={filters} value={filter} onChange={setFilter} /><div className="opportunity-list">{filtered.map((item) => <article className="opportunity-card" key={item.id}><div className="opportunity-card-head"><div><span className="eyebrow">{item.category}</span><h3>{item.title}</h3></div><SourcePill value={item.evidenceStatus} /></div><div className="opportunity-meta"><span><small>Fit</small><strong>{item.fit}</strong></span><span><small>Risk</small><strong>{item.risk}</strong></span><span><small>Owner</small><strong>{item.owner}</strong></span><label><small>Status</small><select value={item.status} onChange={(event) => onOpportunityChange({ ...item, status: event.target.value })}><option>Ready</option><option>Build</option><option>Validate</option><option>Research</option><option>Parked</option></select></label></div><p><strong>Next test:</strong> {item.nextTest}</p><p className="opportunity-success"><strong>Success signal:</strong> {item.successMetric}</p><small className="source-line">Sources: {item.sourceIds.map((sourceId) => sourceFor(sourceId).fileName).join(" · ")}</small></article>)}</div><section className="decision-log"><div className="research-section-heading"><div><span className="eyebrow">Decision log</span><h3>Keep open questions visible</h3></div><small>Only explicit decisions become policy.</small></div>{decisions.map((decision) => <div className="decision-row" key={decision.id}><span><strong>{decision.question}</strong><small>{decision.decision}</small></span><label><small>Status</small><select value={decision.status} onChange={(event) => onDecisionChange({ ...decision, status: event.target.value })}><option>Open</option><option>Guardrail</option><option>Decided</option><option>Parked</option></select></label><span className="decision-due">{decision.due}</span></div>)}</section></div>;
 }
 
 function MetricsView({ metrics, onMetricChange }) {
   const grouped = metrics.reduce((groups, metric) => { groups[metric.area] = [...(groups[metric.area] || []), metric]; return groups; }, {});
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Measurement system" title="Measure the work you can actually influence." text="Archived measurements remain source-labeled context. Live reporting uses only confirmed workspace records and connected analytics." /><div className="metric-area-grid">{Object.entries(grouped).map(([area, rows]) => <div className="metric-area" key={area}><span className="eyebrow">{area}</span><strong>{rows.length}</strong><small>tracked measures</small></div>)}</div><div className="research-table data-table metrics-table"><div className="data-head"><span>Period</span><span>Metric</span><span>Actual</span><span>Target</span><span>Definition / source</span></div>{metrics.map((metric) => <div className="data-row" key={metric.id}><span><strong>{metric.period}</strong><small>{metric.area}</small></span><span>{metric.metric}</span><span><strong>{metric.actual}</strong><small>{metric.unit}</small></span><span>{metric.target}</span><span>{metric.definition}<small>{sourceFor(metric.sourceId).fileName}</small></span></div>)}</div><div className="report-note"><strong>Measurement guardrail</strong><p>Competitor observations are context. The operating scorecard should prioritize Fired Arts’ own reach, replies, visits, bookings, pickup returns, partner responses, and experiment margins.</p></div></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Measurement system" title="Measure the work you can actually influence." text="Start with the supplied baseline, then add results from content runs, pickup retention, partner conversations, and product experiments." /><div className="metric-area-grid">{Object.entries(grouped).map(([area, rows]) => <div className="metric-area" key={area}><span className="eyebrow">{area}</span><strong>{rows.length}</strong><small>tracked measures</small></div>)}</div><div className="research-table data-table metrics-table"><div className="data-head"><span>Period</span><span>Metric</span><span>Actual</span><span>Target</span><span>Definition / source</span></div>{metrics.map((metric) => <div className="data-row" key={metric.id}><span><strong>{metric.period}</strong><small>{metric.area}</small></span><span>{metric.metric}</span><label className="metric-edit"><input type="text" value={metric.actual} onChange={(event) => onMetricChange({ ...metric, actual: event.target.value })} /><small>{metric.unit}</small></label><span>{metric.target}</span><span>{metric.definition}<small>{sourceFor(metric.sourceId).fileName}</small></span></div>)}</div><div className="report-note"><strong>Measurement guardrail</strong><p>Competitor observations are context. The operating scorecard should prioritize Fired Arts’ own reach, replies, visits, bookings, pickup returns, partner responses, and experiment margins.</p></div></div>;
 }
 
 function OffersView({ onOffer, offerDrafts }) {
@@ -486,12 +503,12 @@ function CampaignModal({ open, offers: offerOptions, targets, onClose, onSave })
 function CampaignsView({ campaigns, onOpen, onCreate }) {
   return <div className="view-content workspace-view">
     <SectionTitle eyebrow="Marketing workspace" title="Give every good idea a place to go." text="Campaigns turn a Fired Arts offer into a brief, a platform-ready content set, a calendar slot, and a reason to start a local conversation." action="New campaign" onAction={onCreate} />
-    <div className="workspace-summary"><div><small>Active campaigns</small><strong>{campaigns.length}</strong></div><div><small>Platform variants</small><strong>{campaigns.length * platformIds.length}</strong></div><div><small>Needs review</small><strong>{campaigns.filter((campaign) => campaign.status === "review").length}</strong></div><div><small>Cloud workflow</small><strong>Connected</strong></div></div>
-    <div className="campaign-list">{campaigns.map((campaign) => <button className="campaign-list-row" key={campaign.id} onClick={() => onOpen(campaign.id)}><span className="campaign-status-dot" /><span><strong>{campaign.title}</strong><small>{campaign.audience} · {campaign.startDate || "No date set"}</small></span><span className="campaign-platforms">{campaign.platformIds.map((id) => <i key={id} className={id}>{platformGuidance[id].icon}</i>)}</span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><Arrow /></button>)}</div>
+    <div className="workspace-summary"><div><small>Active campaigns</small><strong>{campaigns.length}</strong></div><div><small>Platform variants</small><strong>{campaigns.length * platformIds.length}</strong></div><div><small>Needs review</small><strong>{campaigns.filter((campaign) => campaign.status === "Review").length}</strong></div><div><small>Local-first workflow</small><strong>Ready</strong></div></div>
+    <div className="campaign-list">{campaigns.length === 0 ? <div className="empty-state"><strong>No campaigns yet.</strong><span>Create your first campaign to turn a Fired Arts offer into platform-ready content.</span></div> : campaigns.map((campaign) => <button className="campaign-list-row" key={campaign.id} onClick={() => onOpen(campaign.id)}><span className="campaign-status-dot" /><span><strong>{campaign.title}</strong><small>{campaign.audience} · {campaign.startDate || "No date set"}</small></span><span className="campaign-platforms">{campaign.platformIds.map((id) => <i key={id} className={id}>{platformGuidance[id].icon}</i>)}</span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><Arrow /></button>)}</div>
   </div>;
 }
 
-function SocialStudioView({ campaign, assets, targets, settings, onChange, onSave, onExport, onStartConversation, onOpenAssets, onCreate, onBack }) {
+function SocialStudioView({ campaign, assets, targets, onChange, onSave, onExport, onStartConversation, onOpenAssets, onCreate, onBack }) {
   const [activePlatform, setActivePlatform] = useState("instagram");
   const [copyState, setCopyState] = useState("");
   if (!campaign) return <div className="view-content"><SectionTitle eyebrow="Social Studio" title="Choose a campaign to begin." text="Create a campaign first, then adapt the same idea across Instagram, Facebook, TikTok, and LinkedIn." action="New campaign" onAction={onCreate} /></div>;
@@ -502,16 +519,16 @@ function SocialStudioView({ campaign, assets, targets, settings, onChange, onSav
   const target = targets.find((item) => campaign.targetIds?.includes(item.id)) || targets[0];
   const updateVariant = (field, value) => onChange({ ...campaign, variants: { ...campaign.variants, [editingPlatform]: { ...variant, [field]: value } } });
   const toggleAsset = (assetId) => updateVariant("assetIds", (variant.assetIds || []).includes(assetId) ? variant.assetIds.filter((id) => id !== assetId) : [...(variant.assetIds || []), assetId]);
-  const toggleReview = () => { const nextStatus = campaign.status === "review" ? "draft" : "review"; onChange({ ...campaign, status: nextStatus, updatedAt: new Date().toISOString(), variants: Object.fromEntries(platformIds.map((id) => [id, { ...campaign.variants[id], status: nextStatus }])) }); };
+  const toggleReview = () => { const nextStatus = campaign.status === "Review" ? "Draft" : "Review"; onChange({ ...campaign, status: nextStatus, variants: Object.fromEntries(platformIds.map((id) => [id, { ...campaign.variants[id], status: nextStatus }])) }); };
   const copyPost = async () => { const copied = await copyToClipboard(`${variant.hook}\n\n${variant.caption}\n\n${variant.hashtags}`); setCopyState(copied ? "Copied" : "Select and copy"); window.setTimeout(() => setCopyState(""), 1800); };
   return <div className="view-content studio-view">
-    <div className="studio-heading"><div><button className="back-link" onClick={onBack}>← Campaigns</button><div className="eyebrow">Social Studio / Campaign</div><h1>{campaign.title}</h1><p>{campaign.objective}</p></div><div className="studio-heading-actions"><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span>{["draft", "review"].includes(campaign.status) && <button className="text-button" onClick={toggleReview}>{campaign.status === "draft" ? "Send to review" : "Return to draft"}</button>}<button className="primary-button" onClick={onSave}>Save draft <Arrow /></button><button className="ink-button" onClick={onExport}>Export pack <Arrow /></button></div></div>
+    <div className="studio-heading"><div><button className="back-link" onClick={onBack}>← Campaigns</button><div className="eyebrow">Social Studio / Campaign</div><h1>{campaign.title}</h1><p>{campaign.objective}</p></div><div className="studio-heading-actions"><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><button className="text-button" onClick={toggleReview}>{campaign.status === "Draft" ? "Send to review" : "Return to draft"}</button><button className="primary-button" onClick={onSave}>Save draft <Arrow /></button><button className="ink-button" onClick={onExport}>Export pack <Arrow /></button></div></div>
     <PlatformTabs activePlatform={activePlatform} setActivePlatform={setActivePlatform} />
     <div className="studio-grid">
-      <section className="studio-card brief-card"><div className="studio-card-head"><h2>Campaign Brief</h2><button className="text-button" onClick={() => onChange({ ...campaign, objective: `${campaign.objective} Refine the message for a local, welcoming audience.` })}>Edit</button></div><div className="brief-copy"><small>Objective</small><p>{campaign.objective}</p><small>Key message</small><textarea value={campaign.keyMessage} onChange={(event) => onChange({ ...campaign, keyMessage: event.target.value })} /><small>Audience</small><input value={campaign.audience} onChange={(event) => onChange({ ...campaign, audience: event.target.value })} /><small>Call to action</small><input value={campaign.cta} onChange={(event) => onChange({ ...campaign, cta: event.target.value })} /></div><div className="key-details"><small>Key details</small><strong>{offers.find((offer) => offer.id === campaign.offerId)?.title || "Fired Arts offer"}</strong><span>{campaign.startDate || "Date to be set"} · {campaign.endDate || "Open-ended"}</span><span>{settings?.location || "Location not configured"} · live campaign</span></div></section>
+      <section className="studio-card brief-card"><div className="studio-card-head"><h2>Campaign Brief</h2><button className="text-button" onClick={() => onChange({ ...campaign, objective: `${campaign.objective} Refine the message for a local, welcoming audience.` })}>Edit</button></div><div className="brief-copy"><small>Objective</small><p>{campaign.objective}</p><small>Key message</small><textarea value={campaign.keyMessage} onChange={(event) => onChange({ ...campaign, keyMessage: event.target.value })} /><small>Audience</small><input value={campaign.audience} onChange={(event) => onChange({ ...campaign, audience: event.target.value })} /><small>Call to action</small><input value={campaign.cta} onChange={(event) => onChange({ ...campaign, cta: event.target.value })} /></div><div className="key-details"><small>Key details</small><strong>{offers.find((offer) => offer.id === campaign.offerId)?.title || "Fired Arts offer"}</strong><span>{campaign.startDate || "Date to be set"} · {campaign.endDate || "Open-ended"}</span><span>Kokomo, Indiana · local-first campaign</span></div></section>
       <section className="studio-card composer-card"><div className="studio-card-head"><h2>Post Composer <small>({guidance.label})</small></h2><span className="code-native">&lt;/&gt; Code-native</span></div><label>Hook <span>{variant.hook.length} / {guidance.hookLimit}</span><input value={variant.hook} onChange={(event) => updateVariant("hook", event.target.value)} /></label><label>Caption <span>{variant.caption.length} / {guidance.captionLimit}</span><textarea value={variant.caption} onChange={(event) => updateVariant("caption", event.target.value)} /></label><label>Call to action<select value={variant.cta} onChange={(event) => updateVariant("cta", event.target.value)}><option>Plan your visit</option><option>Reserve your seat</option><option>Request the PTO menu</option><option>See the studio</option><option>Start a conversation</option><option>Learn more</option></select></label><label>Destination link<input value={variant.destinationUrl} onChange={(event) => updateVariant("destinationUrl", event.target.value)} /></label><label>Hashtags<input value={variant.hashtags} onChange={(event) => updateVariant("hashtags", event.target.value)} /></label><div className="composer-actions"><button className="text-button" onClick={copyPost}>{copyState || "Copy post"} <Arrow /></button><span className={variant.caption.length > guidance.captionLimit ? "validation-warning" : "validation-ready"}>{variant.caption.length > guidance.captionLimit ? "Needs a trim" : "Ready to review"}</span></div></section>
       <section className="studio-card preview-card"><div className="studio-card-head"><h2>Post Preview <small>({guidance.label})</small></h2><span className="preview-format">{guidance.format}</span></div><div className={`post-preview ${activePlatform}`}><div className="preview-account"><span className="preview-avatar"><BrandGlyph /></span><span><strong>firedartsstudio</strong><small>Kokomo, Indiana</small></span><b>•••</b></div><div className="preview-media">{selectedAsset ? <><img src={selectedAsset.src} alt={selectedAsset.name} /><span>{variant.hook}</span></> : <div className="preview-media-empty"><strong>No visual selected</strong><small>Upload or choose a real campaign image in Assets.</small><button className="text-button" onClick={onOpenAssets}>Open Assets <Arrow /></button></div>}</div><div className="preview-reactions"><span>♡</span><span>◌</span><span>⌁</span><span>□</span></div><p><strong>firedartsstudio</strong> {variant.caption}</p><small className="preview-tags">{variant.hashtags}</small><small className="preview-location">{variant.cta} · Downtown Kokomo</small></div></section>
-      <aside className="studio-rail"><section className="studio-card asset-card"><div className="studio-card-head"><h2>Asset / Shot List</h2><button className="text-button" onClick={onOpenAssets}>Manage Assets</button></div>{assets.length ? assets.slice(0, 4).map((asset) => <label className="asset-row" key={asset.id}><img src={asset.downloadUrl || asset.src} alt="" /><span><strong>{asset.name}</strong><small>{asset.contentType || asset.type}</small></span><input type="checkbox" checked={(variant.assetIds || []).includes(asset.id)} onChange={() => toggleAsset(asset.id)} /></label>) : <div className="asset-empty-row">No cloud images yet. Upload one in Assets to add a campaign visual.</div>}</section>{target ? <section className="studio-card conversation-card"><div className="studio-card-head"><h2>Start the Conversation</h2><button className="text-button" onClick={() => onStartConversation(target)}>View all</button></div><span className="target-kicker">Target business</span><strong>{target.name}</strong><small>{target.segment} · {target.place}</small><p>Turn this campaign into a personal, useful opener for a local partner.</p><button className="ink-button full" onClick={() => onStartConversation(target)}>Draft partner message <Arrow /></button></section> : <section className="studio-card conversation-card"><h2>No live contact selected</h2><p>Add and verify a contact before creating an outreach handoff.</p></section>}</aside>
+      <aside className="studio-rail"><section className="studio-card asset-card"><div className="studio-card-head"><h2>Asset / Shot List</h2><button className="text-button" onClick={onOpenAssets}>Manage Assets</button></div>{assets.length ? assets.slice(0, 4).map((asset) => <label className="asset-row" key={asset.id}><img src={asset.src} alt="" /><span><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small></span><input type="checkbox" checked={(variant.assetIds || []).includes(asset.id)} onChange={() => toggleAsset(asset.id)} /></label>) : <div className="asset-empty-row">No local images yet. Upload one in Assets to add a campaign visual.</div>}</section><section className="studio-card conversation-card"><div className="studio-card-head"><h2>Start the Conversation</h2><button className="text-button" onClick={() => onStartConversation(target)}>View all</button></div><span className="target-kicker">Target business</span><strong>{target.name}</strong><small>{target.segment} · {target.place}</small><p>Turn this campaign into a personal, useful opener for a local partner.</p><button className="ink-button full" onClick={() => onStartConversation(target)}>Draft partner message <Arrow /></button></section></aside>
     </div>
     <section className="platform-overview"><div className="studio-card-head"><h2>Platform adaptations overview</h2><span>One brief · four editable variants</span></div><div className="adaptation-grid">{platformIds.map((id) => <button key={id} className={`adaptation-card ${campaign.variants[id].status.toLowerCase()}`} onClick={() => setActivePlatform(id)}><span className={`platform-symbol ${id}`}>{platformGuidance[id].icon}</span><strong>{platformGuidance[id].label}</strong><small>{platformGuidance[id].format}</small><p>{platformGuidance[id].description}</p><span className="status-chip">{campaign.variants[id].status}</span></button>)}</div></section>
   </div>;
@@ -521,77 +538,42 @@ function CalendarView({ campaigns, onOpen, onChangeCampaign }) {
   const [filter, setFilter] = useState("All");
   const rows = campaigns.flatMap((campaign) => platformIds.map((platform) => ({ campaign, platform, variant: campaign.variants[platform], date: campaign.variants[platform].scheduledAt || campaign.startDate || "Not scheduled" }))).filter((row) => filter === "All" || row.variant.status === filter);
   const updateVariant = (campaign, platform, changes) => onChangeCampaign({ ...campaign, variants: { ...campaign.variants, [platform]: { ...campaign.variants[platform], ...changes } } });
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Content calendar" title="Keep the good ideas moving." text="Dates are planning records. Provider event and post identifiers confirm external actions." /><div className="view-toolbar"><FilterBar options={["All", "draft", "review", "approved", "scheduled", "handoff", "published", "failed"]} value={filter} onChange={setFilter} /><span className="calendar-note">{rows.length} live platform variants</span></div><div className="calendar-list">{rows.map((row) => <div className="calendar-row" key={`${row.campaign.id}-${row.platform}`}><span className="calendar-date">{row.date}</span><span className={`platform-symbol ${row.platform}`}>{platformGuidance[row.platform].icon}</span><button className="calendar-row-open" onClick={() => onOpen(row.campaign.id)}><strong>{row.campaign.title}</strong><small>{platformGuidance[row.platform].label} · {row.variant.hook}</small></button><label className="calendar-control"><span>Date</span><input type="date" value={row.variant.scheduledAt || row.campaign.startDate || ""} onChange={(event) => updateVariant(row.campaign, row.platform, { scheduledAt: event.target.value, status: row.variant.status === "approved" ? "scheduled" : row.variant.status })} /></label><span className={`status-chip ${row.variant.status}`}>{row.variant.status}</span></div>)}</div></div>;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Content calendar" title="Keep the good ideas moving." text="Prepare a steady rhythm of posts without losing the local story behind each campaign." /><div className="view-toolbar"><FilterBar options={["All", "Draft", "Review", "Approved", "Queued"]} value={filter} onChange={setFilter} /><span className="calendar-note">{rows.length} platform variants · publishing remains manual in v1</span></div><div className="calendar-list">{rows.map((row) => <div className="calendar-row" key={`${row.campaign.id}-${row.platform}`}><span className="calendar-date">{row.date}</span><span className={`platform-symbol ${row.platform}`}>{platformGuidance[row.platform].icon}</span><button className="calendar-row-open" onClick={() => onOpen(row.campaign.id)}><strong>{row.campaign.title}</strong><small>{platformGuidance[row.platform].label} · {row.variant.hook}</small></button><label className="calendar-control"><span>Date</span><input type="date" value={row.variant.scheduledAt || row.campaign.startDate || ""} onChange={(event) => updateVariant(row.campaign, row.platform, { scheduledAt: event.target.value })} /></label><label className="calendar-control"><span>Status</span><select value={row.variant.status} onChange={(event) => updateVariant(row.campaign, row.platform, { status: event.target.value })}>{["Draft", "Review", "Approved", "Queued"].map((status) => <option key={status}>{status}</option>)}</select></label></div>)}</div></div>;
 }
 
 function ConversationsView({ conversations, targets, onChange, onStart, onContact, onLogActivity }) {
   const [selectedId, setSelectedId] = useState(conversations[0]?.id || "");
-  const [handoff, setHandoff] = useState({ busy: false, message: "", error: "" });
   const selected = conversations.find((conversation) => conversation.id === selectedId) || conversations[0];
-
-  if (!selected) {
-    return <div className="view-content"><SectionTitle eyebrow="Conversations" title="Start with a useful reason to talk." text="Create your first partner conversation from a verified contact or campaign." action="Open Contacts" onAction={onContact} /></div>;
-  }
-
-  const target = targets.find((item) => item.id === selected.targetId);
-  const patchConversation = (changes) => onChange({ ...selected, ...changes, updatedAt: new Date().toISOString() });
-  const createGmailDraft = async () => {
-    if (!target?.contactEmail) {
-      setHandoff({ busy: false, message: "", error: "Add a verified email address to this contact first." });
-      return;
-    }
-    setHandoff({ busy: true, message: "", error: "" });
-    try {
-      const result = await callAuthenticatedApi("/api/google/gmail-drafts", {
-        method: "POST",
-        body: { to: target.contactEmail, subject: selected.subject || "A note from Fired Arts", body: selected.messageDraft }
-      });
-      patchConversation({ status: "handoff", providerDraftId: result.data?.draftId || result.draftId, handoffAt: new Date().toISOString() });
-      setHandoff({ busy: false, message: "Gmail confirmed the draft. Nothing was sent.", error: "" });
-    } catch (error) {
-      setHandoff({ busy: false, message: "", error: error.message });
-    }
-  };
-  const confirmManualSend = () => {
-    if (!window.confirm("Confirm that you personally sent this message outside Growth HQ. This will add an audit record.")) return;
-    onLogActivity(selected, "manual-send");
-    setHandoff({ busy: false, message: "Manual send recorded with the current timestamp.", error: "" });
-  };
-
-  return <div className="view-content workspace-view">
-    <SectionTitle eyebrow="Partner conversations" title="Make the first message feel like a real invitation." text="A message is only marked sent after a provider confirms it or you explicitly record a manual send." action="Open contacts" onAction={onContact} />
-    <div className="conversation-layout">
-      <div className="conversation-list">
-        {conversations.map((conversation) => {
-          const item = targets.find((row) => row.id === conversation.targetId);
-          return <button className={`conversation-list-row ${conversation.id === selected.id ? "selected" : ""}`} key={conversation.id} onClick={() => setSelectedId(conversation.id)}><span className="conversation-avatar">{item?.name?.slice(0, 1) || "?"}</span><span><strong>{item?.name || "Missing contact"}</strong><small>{conversation.status} · {conversation.nextFollowUpAt || "No follow-up"}</small></span><Arrow /></button>;
-        })}
-        <button className="table-footer" disabled={!targets.length} onClick={() => onStart(targets[0])}>+ Start a conversation <Arrow /></button>
-      </div>
-      <section className="conversation-detail studio-card">
-        <div className="studio-card-head"><div><div className="eyebrow">{target?.segment || "Contact unavailable"}</div><h2>{target?.name || "Missing contact"}</h2></div><span className={`status-chip ${selected.status.toLowerCase().replaceAll(" ", "-")}`}>{selected.status}</span></div>
-        <div className="drawer-meta"><span><small>Place</small><strong>{target?.place || "Not recorded"}</strong></span><span><small>Email</small><strong>{target?.contactEmail || "Not verified"}</strong></span></div>
-        <label>Channel<select value={selected.channel} onChange={(event) => patchConversation({ channel: event.target.value })}><option>Email</option><option>Instagram DM</option><option>Phone</option><option>In person</option><option>LinkedIn</option></select></label>
-        <label>Contact name<input value={selected.contactName || ""} onChange={(event) => patchConversation({ contactName: event.target.value })} placeholder="Add a person when verified" /></label>
-        <label>Subject<input value={selected.subject || ""} onChange={(event) => patchConversation({ subject: event.target.value })} placeholder="A note from Fired Arts" /></label>
-        <label>Personalized message<textarea value={selected.messageDraft || ""} onChange={(event) => patchConversation({ messageDraft: event.target.value, status: "draft" })} /></label>
-        <label>Notes<textarea value={selected.notes || ""} onChange={(event) => patchConversation({ notes: event.target.value })} /></label>
-        <div className="conversation-actions"><label>Follow-up date<input type="date" value={selected.nextFollowUpAt || ""} onChange={(event) => patchConversation({ nextFollowUpAt: event.target.value })} /></label><label>Review state<select value={["draft", "review", "paused"].includes(selected.status) ? selected.status : "review"} onChange={(event) => patchConversation({ status: event.target.value })}><option value="draft">Draft</option><option value="review">Review</option><option value="paused">Paused</option></select></label></div>
-        {selected.history?.length > 0 && <div className="activity-log"><div className="activity-log-head"><strong>Audit log</strong><small>{selected.history.length} logged</small></div>{selected.history.slice().reverse().map((entry) => <div className="activity-entry" key={entry.id}><span>{entry.occurredAt ? new Date(entry.occurredAt).toLocaleString() : entry.date}</span><p><strong>{entry.type}</strong><br />{entry.detail || entry.body}</p></div>)}</div>}
-        {handoff.error && <div className="integration-error" role="alert">{handoff.error}</div>}
-        {handoff.message && <span className="success-note" role="status">{handoff.message}</span>}
-        <div className="modal-actions"><button className="primary-button" disabled={handoff.busy || !selected.messageDraft} onClick={createGmailDraft}>{handoff.busy ? "Creating Gmail draft…" : "Create Gmail draft"} <Arrow /></button><button className="ink-button" disabled={!selected.messageDraft} onClick={confirmManualSend}>Record manual send</button><button className="text-button" disabled={!selected.messageDraft} onClick={() => copyToClipboard(selected.messageDraft)}>Copy message <Arrow /></button></div>
-      </section>
-    </div>
-  </div>;
+  if (!selected) return <div className="view-content"><SectionTitle eyebrow="Conversations" title="Start with a useful reason to talk." text="Create your first partner conversation from a local target or campaign." action="Open Contacts" onAction={onContact} /></div>;
+  const target = targets.find((item) => item.id === selected.targetId) || targets[0];
+  const patchConversation = (changes) => onChange({ ...selected, ...changes });
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Local partner conversations" title="Make the first message feel like a real invitation." text="Track the people, businesses, and organizations that can help Fired Arts become part of a larger local day." action="Open contacts" onAction={onContact} /><div className="conversation-layout"><div className="conversation-list">{conversations.map((conversation) => { const item = targets.find((row) => row.id === conversation.targetId) || {}; return <button className={`conversation-list-row ${conversation.id === selected.id ? "selected" : ""}`} key={conversation.id} onClick={() => setSelectedId(conversation.id)}><span className="conversation-avatar">{item.name?.slice(0, 1)}</span><span><strong>{item.name}</strong><small>{conversation.status} · {conversation.nextFollowUpAt || "No follow-up"}</small></span><Arrow /></button>; })}<button className="table-footer" onClick={() => onStart(target)}>+ Start a conversation <Arrow /></button></div><section className="conversation-detail studio-card"><div className="studio-card-head"><div><div className="eyebrow">{target.segment}</div><h2>{target.name}</h2></div><span className={`status-chip ${selected.status.toLowerCase().replaceAll(" ", "-")}`}>{selected.status}</span></div><div className="drawer-meta"><span><small>Place</small><strong>{target.place}</strong></span><span><small>Offer lane</small><strong>{target.offer}</strong></span></div><label>Channel<select value={selected.channel} onChange={(event) => patchConversation({ channel: event.target.value })}><option>Email</option><option>Instagram DM</option><option>Phone</option><option>In person</option><option>LinkedIn</option></select></label><label>Contact name<input value={selected.contactName} onChange={(event) => patchConversation({ contactName: event.target.value })} placeholder="Add a person when verified" /></label><label>Personalized message<textarea value={selected.messageDraft} onChange={(event) => patchConversation({ messageDraft: event.target.value })} /></label><label>Notes<textarea value={selected.notes} onChange={(event) => patchConversation({ notes: event.target.value })} /></label><div className="conversation-actions"><label>Follow-up date<input type="date" value={selected.nextFollowUpAt || ""} onChange={(event) => patchConversation({ nextFollowUpAt: event.target.value })} /></label><label>Status<select value={selected.status} onChange={(event) => patchConversation({ status: event.target.value })}>{["New", "Research", "Drafted", "Sent", "Replied", "Follow-up", "Won", "Paused"].map((status) => <option key={status}>{status}</option>)}</select></label></div>{selected.history?.length > 0 && <div className="activity-log"><div className="activity-log-head"><strong>Activity log</strong><small>{selected.history.length} logged</small></div>{selected.history.slice().reverse().map((entry) => <div className="activity-entry" key={entry.id}><span>{entry.date}</span><p><strong>{entry.type}</strong> via {entry.channel}<br />{entry.body}</p></div>)}</div>}<div className="modal-actions"><button className="primary-button" onClick={() => onLogActivity(selected)}>Mark sent & log <Arrow /></button><button className="text-button" onClick={() => copyToClipboard(selected.messageDraft)}>Copy message <Arrow /></button><span className="success-note">Saved locally</span></div></section></div></div>;
 }
 
-function AssetsView({ assets, onUpload, onRemoveAsset }) {
+function AssetsView({ assets, onAddAsset, onRemoveAsset }) {
   const [query, setQuery] = useState("");
-  const [uploadState, setUploadState] = useState({ busy: false, error: "" });
   const filtered = assets.filter((asset) => `${asset.name} ${asset.tags.join(" ")}`.toLowerCase().includes(query.toLowerCase()));
-  const handleUpload = async (event) => { const file = event.target.files?.[0]; if (!file) return; setUploadState({ busy: true, error: "" }); try { await onUpload(file); } catch (error) { setUploadState({ busy: false, error: error.message }); } finally { event.target.value = ""; setUploadState((current) => ({ ...current, busy: false })); } };
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="Upload approved studio and campaign images to protected cloud storage, then select them in Social Studio." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className={`primary-button upload-button ${uploadState.busy ? "disabled" : ""}`}>{uploadState.busy ? "Uploading…" : "Upload cloud asset"} <Arrow /><input type="file" accept="image/*" disabled={uploadState.busy} onChange={handleUpload} /></label></div>{uploadState.error && <div className="integration-error" role="alert">{uploadState.error}</div>}{filtered.length ? <div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.downloadUrl || asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.contentType || asset.type} · {typeof asset.size === "number" ? `${Math.round(asset.size / 1024)} KB` : asset.size}</small><span>{asset.tags.join(" · ")}</span><button className="text-button asset-remove" onClick={() => onRemoveAsset(asset.id)}>Remove record</button></div></article>)}</div> : <div className="empty-state asset-empty-state">No live assets yet. Upload an approved Fired Arts image to begin.</div>}</div>;
+  const [uploading, setUploading] = useState(false);
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const assetId = makeId("asset");
+    const meta = { id: assetId, name: file.name, type: "Uploaded image", size: `${Math.round(file.size / 1024)} KB`, tags: ["uploaded", "session"] };
+    setUploading(true);
+    try {
+      const { url, path } = await uploadAssetFile(file, assetId);
+      onAddAsset({ ...meta, src: url, storagePath: path });
+    } catch (err) {
+      console.warn("Cloud upload failed, keeping a local copy:", err);
+      const reader = new FileReader();
+      reader.onload = () => onAddAsset({ ...meta, src: reader.result });
+      reader.readAsDataURL(file);
+    } finally {
+      setUploading(false);
+    }
+  };
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Asset library" title="Keep the visual language close at hand." text="Upload real studio or campaign images to the shared library, then select them in Social Studio. The Fired Arts brand lockup remains available as a protected brand asset." /><div className="view-toolbar"><SearchBar value={query} onChange={setQuery} placeholder="Search assets and tags" /><label className={`primary-button upload-button${uploading ? " is-busy" : ""}`}>{uploading ? "Uploading…" : <span>Add shared asset <Arrow /></span>}<input type="file" accept="image/*" onChange={handleUpload} disabled={uploading} /></label></div>{filtered.length ? <div className="asset-library-grid">{filtered.map((asset) => <article className="library-asset" key={asset.id}><img src={asset.src} alt={asset.name} /><div><strong>{asset.name}</strong><small>{asset.type} · {asset.size}</small><span>{asset.tags.join(" · ")}</span><button className="text-button asset-remove" disabled={asset.type === "Brand"} onClick={() => onRemoveAsset(asset.id)}>{asset.type === "Brand" ? "Brand asset" : "Remove asset"}</button></div></article>)}</div> : <div className="empty-state asset-empty-state">No assets match this search. Upload a real Fired Arts image to use it in a campaign.</div>}</div>;
 }
 
 function TemplatesView({ onUse }) {
@@ -599,34 +581,20 @@ function TemplatesView({ onUse }) {
 }
 
 function ApprovalsView({ campaigns, onOpen, onApprove }) {
-  const reviewCampaigns = campaigns.filter((campaign) => campaign.status === "review" || campaign.status === "approved" || Object.values(campaign.variants).some((variant) => variant.status === "review"));
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Approval queue" title="Review the whole story before it leaves the studio." text="Check the brief, platform variants, assets, and partner tie-in as one campaign." /><div className="approval-list">{reviewCampaigns.map((campaign) => <div className="approval-row" key={campaign.id}><span><strong>{campaign.title}</strong><small>{campaign.audience} · {platformIds.length} variants</small></span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><button className="text-button" onClick={() => onOpen(campaign.id)}>Review <Arrow /></button>{campaign.status === "review" && <button className="primary-button" onClick={() => onApprove(campaign.id)}>Approve <Arrow /></button>}</div>)}{reviewCampaigns.length === 0 && <div className="empty-state">No live campaigns are waiting for review.</div>}</div></div>;
+  const reviewCampaigns = campaigns.filter((campaign) => campaign.status === "Review" || campaign.status === "Approved" || Object.values(campaign.variants).some((variant) => variant.status === "Review"));
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Approval queue" title="Review the whole story before it leaves the studio." text="Check the brief, platform variants, assets, and partner tie-in as one campaign." /><div className="approval-list">{reviewCampaigns.map((campaign) => <div className="approval-row" key={campaign.id}><span><strong>{campaign.title}</strong><small>{campaign.audience} · {platformIds.length} variants</small></span><span className={`status-chip ${campaign.status.toLowerCase()}`}>{campaign.status}</span><button className="text-button" onClick={() => onOpen(campaign.id)}>Review <Arrow /></button>{campaign.status === "Review" && <button className="primary-button" onClick={() => onApprove(campaign.id)}>Approve <Arrow /></button>}</div>)}{reviewCampaigns.length === 0 && <div className="empty-state">No campaigns are waiting for review yet.</div>}</div></div>;
 }
 
-function ReportsView({ campaigns, conversations, metrics }) {
-  const sent = conversations.filter((conversation) => ["sent", "replied", "won"].includes(conversation.status)).length;
-  const readyVariants = campaigns.reduce((sum, campaign) => sum + Object.values(campaign.variants || {}).filter((variant) => ["approved", "scheduled", "handoff", "published"].includes(variant.status)).length, 0);
-  const published = campaigns.filter((campaign) => campaign.status === "published").length;
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Live reports" title="See what the connected workspace can confirm." text="Totals use only live workspace records. Archived research never inflates current KPIs." /><div className="report-grid"><div><small>Live campaigns</small><strong>{campaigns.length}</strong><span>{published} provider-confirmed published</span></div><div><small>Approved variants</small><strong>{readyVariants}</strong><span>approved or further in the guarded lifecycle</span></div><div><small>Live metrics</small><strong>{metrics.length}</strong><span>connected or explicitly recorded results</span></div><div><small>Confirmed sends</small><strong>{sent}</strong><span>provider-confirmed or manually audited</span></div></div><div className="report-insight-grid"><div><small>Conversations</small><strong>{conversations.length}</strong><span>live relationship records</span></div><div><small>Unverified archive totals</small><strong>0</strong><span>excluded by design</span></div></div><div className="report-note"><strong>Reporting boundary</strong><p>Connect Google Analytics or record a confirmed provider result before expecting performance totals here.</p></div></div>;
+function ReportsView({ campaigns, conversations, researchContent, opportunities, metrics }) {
+  const sent = conversations.filter((conversation) => ["Sent", "Replied", "Won"].includes(conversation.status)).length;
+  const readyContent = researchContent.filter((item) => ["Ready", "Published", "Results logged"].includes(item.status)).length;
+  const activeOpportunities = opportunities.filter((item) => item.status !== "Parked").length;
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Reports" title="See where the growth system is moving." text="A local-first snapshot of campaign readiness, research actions, and relationship momentum." /><div className="report-grid"><div><small>Campaigns</small><strong>{campaigns.length}</strong><span>working briefs</span></div><div><small>Variants ready</small><strong>{campaigns.reduce((sum, campaign) => sum + Object.values(campaign.variants).filter((variant) => variant.status !== "Draft").length, 0)}</strong><span>across four platforms</span></div><div><small>Content ready</small><strong>{readyContent}</strong><span>of {researchContent.length} research items</span></div><div><small>In motion</small><strong>{activeOpportunities}</strong><span>of {opportunities.length} opportunities</span></div></div><div className="report-insight-grid"><div><small>Tracked measures</small><strong>{metrics.length}</strong><span>baseline and execution signals</span></div><div><small>Conversations</small><strong>{conversations.length}</strong><span>{sent} sent, replied, or won</span></div></div><div className="report-note"><strong>Next useful question</strong><p>Which research-backed experiment can Fired Arts run this month with a clear owner, safe scope, and result to log?</p></div></div>;
 }
 
-function SettingsView({ settings, onSave, onExportWorkspace, archiveCount }) {
-  const [form, setForm] = useState(settings || { businessName: "Fired Arts Studio", location: "Kokomo, Indiana", websiteUrl: "", bookingUrl: "", contactUrl: "", brandVoice: "Warm, welcoming, specific, and grounded in real studio details.", onboardingComplete: false });
-  const [saved, setSaved] = useState(false);
-  useEffect(() => { if (settings) setForm(settings); }, [settings]);
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const save = () => { onSave({ ...form, onboardingComplete: Boolean(form.websiteUrl && form.contactUrl), updatedAt: new Date().toISOString() }); setSaved(true); window.setTimeout(() => setSaved(false), 1800); };
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These are the canonical business details used by AI, campaign links, and connected workflows." /><div className="settings-form"><label>Business name<input value={form.businessName} onChange={(event) => update("businessName", event.target.value)} /></label><label>Location<input value={form.location} onChange={(event) => update("location", event.target.value)} /></label><label>Website URL<input type="url" value={form.websiteUrl} onChange={(event) => update("websiteUrl", event.target.value)} placeholder="https://…" /></label><label>Booking URL<input type="url" value={form.bookingUrl} onChange={(event) => update("bookingUrl", event.target.value)} placeholder="https://…" /></label><label>Contact URL<input type="url" value={form.contactUrl} onChange={(event) => update("contactUrl", event.target.value)} placeholder="https://…" /></label><label className="settings-span">Brand voice<textarea value={form.brandVoice} onChange={(event) => update("brandVoice", event.target.value)} /></label><div className="settings-action-row settings-span"><button className="primary-button" onClick={save}>Save cloud settings <Arrow /></button>{saved && <span className="success-note">Cloud settings saved</span>}</div></div><div className="settings-list"><div><strong>Persistence</strong><span>Authenticated Firestore workspace with browser recovery copy on failed writes</span><em>Cloud</em></div><div><strong>Research archive</strong><span>{archiveCount} supplied records remain source-labeled and separate from live totals</span><em>Read only</em></div><div><strong>Publishing</strong><span>Provider-confirmed handoff; no simulated publishing state</span><em>Guarded</em></div></div><section className="settings-actions"><div><strong>Workspace export</strong><span>Download the current live records and schema metadata.</span></div><button className="ink-button" onClick={onExportWorkspace}>Export workspace JSON <Arrow /></button></section></div>;
-}
-
-function ConnectionsView() {
-  const [connections, setConnections] = useState([]);
-  const [status, setStatus] = useState({ loading: true, error: "" });
-  const load = async () => { setStatus({ loading: true, error: "" }); try { const result = await callAuthenticatedApi("/api/connections", {}, "GET"); setConnections(result.data || []); setStatus({ loading: false, error: "" }); } catch (error) { setStatus({ loading: false, error: error.message }); } };
-  useEffect(() => { load(); }, []);
-  const connect = async (provider) => { try { const result = await callAuthenticatedApi(`/api/${provider}/connect`, {}); window.location.assign(result.data.authorizationUrl); } catch (error) { setStatus({ loading: false, error: error.message }); } };
-  const card = (provider, title, capability) => { const connection = connections.find((item) => item.id === provider); return <article className="connection-card"><div><span className="eyebrow">{provider}</span><h3>{title}</h3><p>{capability}</p></div><span className={`connection-state ${connection?.status || "disconnected"}`}>{connection?.status || "disconnected"}</span>{connection?.accountLabel && <strong>{connection.accountLabel}</strong>}{connection?.lastSyncedAt && <small>Last sync {new Date(connection.lastSyncedAt).toLocaleString()}</small>}<button className="primary-button" onClick={() => connect(provider)}>{connection?.status === "connected" ? "Reconnect" : "Connect"} <Arrow /></button></article>; };
-  return <div className="view-content workspace-view"><SectionTitle eyebrow="Connections" title="Know exactly what is connected." text="Credentials remain server-side. A status becomes connected only after the provider callback succeeds." />{status.error && <div className="integration-error" role="alert">{status.error}</div>}<div className="connection-grid">{card("google", "Google Workspace", "Analytics reporting, Calendar event creation, and Gmail draft handoff.")}{card("meta", "Meta Business", "Facebook and Instagram account identity, insights, and provider-verified post links.")}</div><div className="report-note"><strong>Publishing boundary</strong><p>Growth HQ prepares approved copy and assets. It does not claim a post or message was sent until the provider returns an identifier or you explicitly record a manual handoff.</p></div></div>;
+function SettingsView({ onExportWorkspace, onResetWorkspace }) {
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  return <div className="view-content workspace-view"><SectionTitle eyebrow="Workspace settings" title="Keep the system easy to trust." text="These controls describe the shared workspace boundary and the brand defaults used by the workspace." /><div className="settings-list"><div><strong>Persistence</strong><span>Cloud workspace · shared live between owners</span><em>Active</em></div><div><strong>Publishing</strong><span>Manual copy/export workflow · no OAuth connections</span><em>Not connected</em></div><div><strong>Brand source</strong><span>Fired Arts Regional Growth HQ lockup</span><em>Canonical</em></div><div><strong>Location</strong><span>{studio.location} · 40-mile growth core</span><em>Working context</em></div></div><section className="settings-actions"><div><strong>Workspace data</strong><span>Download the current local workspace before moving it or clearing this browser.</span></div><div className="settings-action-row"><button className="ink-button" onClick={onExportWorkspace}>Export workspace JSON <Arrow /></button>{confirmingReset ? <><span className="warning-note">This clears local campaigns, contacts, drafts, and metrics.</span><button className="primary-button" onClick={onResetWorkspace}>Confirm reset</button><button className="text-button" onClick={() => setConfirmingReset(false)}>Cancel</button></> : <button className="text-button danger-button" onClick={() => setConfirmingReset(true)}>Reset local workspace</button>}</div></section></div>;
 }
 
 function DetailDrawer({ item, onClose, onBuild, onStartConversation, onSaveTarget }) {
@@ -638,9 +606,9 @@ function DetailDrawer({ item, onClose, onBuild, onStartConversation, onSaveTarge
   const isTarget = Boolean(item.segment);
   const form = draft || item;
   const update = (field, value) => setDraft((current) => ({ ...(current || item), [field]: value }));
-  const saveTarget = () => { const name = (form.name || form.contactName || "").trim(); if (!name) return; onSaveTarget({ ...item, ...form, name, schemaVersion: 2, verificationStatus: form.verificationStatus || "unverified", updatedAt: new Date().toISOString() }); setSaved(true); };
-  const markForFollowUp = () => { const name = (form.name || form.contactName || "").trim(); if (!name) return; onSaveTarget({ ...item, ...form, name, schemaVersion: 2, verificationStatus: form.verificationStatus || "unverified", relationshipStatus: "Follow-up", nextFollowUpAt: form.nextFollowUpAt || new Date().toISOString().slice(0, 10), updatedAt: new Date().toISOString() }); setSaved(true); };
-  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close detail">×</button><div className="eyebrow">{isOffer ? item.category : isTarget ? item.segment : "Selected item"}</div><h2>{isOffer ? item.title : item.name}</h2>{isOffer ? <><p className="drawer-lead">{item.description}</p><div className="drawer-meta"><span><small>Audience</small><strong>{item.audience}</strong></span><span><small>Status</small><strong>{item.status}</strong></span></div><div className="drawer-section"><small>First move</small><p>{item.firstStep}</p></div><button className="primary-button full" onClick={onBuild}>Build this offer <Arrow /></button></> : <><p className="drawer-lead">{item.offer || "A working target in the Fired Arts regional growth system."}</p><div className="drawer-meta"><span><small>Place</small><strong>{item.place || "Working set"}</strong></span><span><small>Relationship</small><strong>{form.relationshipStatus || form.status || "Review"}</strong></span></div><div className="drawer-contact-form"><label>Organization<input value={form.name || ""} onChange={(event) => update("name", event.target.value)} placeholder="Organization or partner name" /></label><label>Contact name<input value={form.contactName || ""} onChange={(event) => update("contactName", event.target.value)} placeholder="Add a verified contact" /></label><label>Email<input type="email" value={form.contactEmail || ""} onChange={(event) => update("contactEmail", event.target.value)} placeholder="name@organization.org" /></label><label>Phone<input value={form.contactPhone || ""} onChange={(event) => update("contactPhone", event.target.value)} placeholder="(765) 000-0000" /></label><label>Verification<select value={form.verificationStatus || "unverified"} onChange={(event) => update("verificationStatus", event.target.value)}><option value="unverified">Unverified</option><option value="verified">Verified</option></select></label><label>Relationship<select value={form.relationshipStatus || "New"} onChange={(event) => update("relationshipStatus", event.target.value)}><option>New</option><option>Research</option><option>Follow-up</option><option>Active</option><option>Paused</option></select></label><label>Follow-up date<input type="date" value={form.nextFollowUpAt || ""} onChange={(event) => update("nextFollowUpAt", event.target.value)} /></label><label>Notes<textarea value={form.notes || ""} onChange={(event) => update("notes", event.target.value)} placeholder="Record permission, timing, or useful context." /></label></div><div className="drawer-section"><small>Why it matters</small><p>Reach the organizer early with a specific, low-friction first offer instead of a general flyer.</p></div><div className="modal-actions"><button className="primary-button" onClick={saveTarget}>Save contact <Arrow /></button><button className="ink-button" onClick={markForFollowUp}>Mark for follow-up <Arrow /></button></div>{saved && <span className="success-note">Saved to the cloud workspace.</span>}<button className="text-button full" onClick={() => onStartConversation({ ...item, ...form })}>Start the conversation <Arrow /></button></>}</aside></div>;
+  const saveTarget = () => { onSaveTarget({ ...item, ...form }); setSaved(true); };
+  const markForFollowUp = () => { onSaveTarget({ ...item, ...form, relationshipStatus: "Follow-up", nextFollowUpAt: form.nextFollowUpAt || new Date().toISOString().slice(0, 10) }); setSaved(true); };
+  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="detail-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="Close detail">×</button><div className="eyebrow">{isOffer ? item.category : isTarget ? item.segment : "Selected item"}</div><h2>{isOffer ? item.title : item.name}</h2>{isOffer ? <><p className="drawer-lead">{item.description}</p><div className="drawer-meta"><span><small>Audience</small><strong>{item.audience}</strong></span><span><small>Status</small><strong>{item.status}</strong></span></div><div className="drawer-section"><small>First move</small><p>{item.firstStep}</p></div><button className="primary-button full" onClick={onBuild}>Build this offer <Arrow /></button></> : <><p className="drawer-lead">{item.offer || "A working target in the Fired Arts regional growth system."}</p><div className="drawer-meta"><span><small>Place</small><strong>{item.place || "Working set"}</strong></span><span><small>Relationship</small><strong>{form.relationshipStatus || form.status || "Review"}</strong></span></div><div className="drawer-contact-form"><label>Contact name<input value={form.contactName || ""} onChange={(event) => update("contactName", event.target.value)} placeholder="Add a verified contact" /></label><label>Email<input type="email" value={form.contactEmail || ""} onChange={(event) => update("contactEmail", event.target.value)} placeholder="name@organization.org" /></label><label>Phone<input value={form.contactPhone || ""} onChange={(event) => update("contactPhone", event.target.value)} placeholder="(765) 000-0000" /></label><label>Relationship<select value={form.relationshipStatus || "New"} onChange={(event) => update("relationshipStatus", event.target.value)}><option>New</option><option>Research</option><option>Follow-up</option><option>Active</option><option>Paused</option></select></label><label>Follow-up date<input type="date" value={form.nextFollowUpAt || ""} onChange={(event) => update("nextFollowUpAt", event.target.value)} /></label><label>Notes<textarea value={form.notes || ""} onChange={(event) => update("notes", event.target.value)} placeholder="Record permission, timing, or useful context." /></label></div><div className="drawer-section"><small>Why it matters</small><p>Reach the organizer early with a specific, low-friction first offer instead of a general flyer.</p></div><div className="modal-actions"><button className="primary-button" onClick={saveTarget}>Save contact <Arrow /></button><button className="ink-button" onClick={markForFollowUp}>Mark for follow-up <Arrow /></button></div>{saved && <span className="success-note">Saved locally.</span>}<button className="text-button full" onClick={() => onStartConversation({ ...item, ...form })}>Start the conversation <Arrow /></button></>}</aside></div>;
 }
 
 function BuilderModal({ offer, onClose, onSaveDraft }) {
@@ -658,43 +626,63 @@ const defaultCoupon = {
   terms: "One use per customer. Present this offer at the next visit. Confirm final terms before publishing.",
 };
 
-function App({ session, signOut }) {
+function App() {
   const [active, setActive] = useState("overview");
   const [range, setRange] = useState("Now");
   const [detail, setDetail] = useState(null);
   const [builder, setBuilder] = useState(null);
-  const [completed, setCompleted] = useState({});
-  const [campaigns, setCampaigns, campaignSync] = useCloudCollection("campaigns", []);
-  const [conversations, setConversations, conversationSync] = useCloudCollection("conversations", []);
-  const [assets, setAssets, assetSync] = useCloudCollection("assets", []);
-  const [targets, setTargets, targetSync] = useCloudCollection("contacts", []);
-  const [offerDrafts, setOfferDrafts] = useCloudCollection("offerDrafts", []);
-  const [settingsRecords, setSettingsRecords, settingsSync] = useCloudCollection("workspaceSettings", []);
-  const [researchArchive, setResearchArchive, archiveSync] = useCloudCollection("researchArchive", []);
-  const [coupon, setCoupon] = useState(defaultCoupon);
-  const researchContent = researchContentSeed;
-  const opportunities = researchOpportunitiesSeed;
-  const metrics = [];
-  const decisions = researchDecisionsSeed;
+  const [completed, setCompleted] = useSyncedState("checklist", {});
+  const [campaigns, setCampaigns] = useSyncedState("campaigns", [], normalizeCampaigns);
+  const [conversations, setConversations] = useSyncedState("conversations", []);
+  const [assets, setAssets] = useSyncedState("assets", assetLibrary, normalizeAssets, stripInlineImages);
+  const [targets, setTargets] = useSyncedState("outreach-targets", outreachTargets);
+  const [offerDrafts, setOfferDrafts] = useSyncedState("offer-drafts", []);
+  const [coupon, setCoupon] = useSyncedState("pickup-coupon", defaultCoupon);
+  const [researchContent, setResearchContent] = useSyncedState("research-content", researchContentSeed);
+  const [opportunities, setOpportunities] = useSyncedState("research-opportunities", researchOpportunitiesSeed);
+  const [metrics, setMetrics] = useSyncedState("research-metrics", researchMetricsSeed);
+  const [decisions, setDecisions] = useSyncedState("research-decisions", researchDecisionsSeed);
   const [campaignModal, setCampaignModal] = useState(false);
   const [couponModal, setCouponModal] = useState(false);
-  const [selectedCampaignId, setSelectedCampaignId] = useState("");
-  const settings = settingsRecords[0] || null;
-  const syncStates = [campaignSync, conversationSync, assetSync, targetSync, settingsSync, archiveSync];
-  const syncStatus = syncStates.some((item) => item.status === "offline" || item.status === "error") ? "offline" : syncStates.some((item) => item.status === "saving") ? "saving" : syncStates.every((item) => item.status === "synced") ? "synced" : "loading";
-  useEffect(() => { if (archiveSync.status === "synced" && researchArchive.length === 0) setResearchArchive(buildResearchArchive()); }, [archiveSync.status, researchArchive.length, setResearchArchive]);
+  const [selectedCampaignId, setSelectedCampaignId] = useLocalState("selected-campaign", "");
 
   const toggleAction = (id) => setCompleted((current) => ({ ...current, [id]: !current[id] }));
   const openOffer = (offer) => setDetail(offer);
   const buildOffer = (offer = detail || offers[0]) => { setDetail(null); setBuilder(offer); };
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignId) || campaigns[0];
   const updateCampaign = (updated) => setCampaigns((current) => current.map((campaign) => campaign.id === updated.id ? updated : campaign));
-  const updateTarget = (updated) => setTargets((current) => current.some((target) => target.id === updated.id) ? current.map((target) => target.id === updated.id ? updated : target) : [updated, ...current]);
-  const removeAsset = (assetId) => { setAssets((current) => current.filter((asset) => asset.id !== assetId)); setCampaigns((current) => current.map((campaign) => ({ ...campaign, assetIds: normalizeAssetIds(campaign.assetIds).filter((id) => id !== assetId), variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds).filter((id) => id !== assetId) }])) }))); };
+  const updateTarget = (updated) => setTargets((current) => current.map((target) => target.id === updated.id ? updated : target));
+  const removeAsset = (assetId) => {
+    const asset = assets.find((item) => item.id === assetId);
+    if (asset?.storagePath) deleteAssetFile(asset.storagePath);
+    setAssets((current) => current.filter((asset) => asset.id !== assetId)); setCampaigns((current) => current.map((campaign) => ({ ...campaign, assetIds: normalizeAssetIds(campaign.assetIds).filter((id) => id !== assetId), variants: Object.fromEntries(Object.entries(campaign.variants || {}).map(([platform, variant]) => [platform, { ...variant, assetIds: normalizeAssetIds(variant.assetIds).filter((id) => id !== assetId) }])) })));
+  };
+  // Migrate any legacy inline (data-URL) images to shared cloud storage once.
+  const migratingAssetsRef = useRef(null);
+  if (!migratingAssetsRef.current) migratingAssetsRef.current = new Set();
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!user?.email) return;
+    const pending = assets.filter((asset) => typeof asset?.src === "string" && asset.src.startsWith("data:") && !migratingAssetsRef.current.has(asset.id));
+    if (!pending.length) return;
+    pending.forEach((asset) => migratingAssetsRef.current.add(asset.id));
+    (async () => {
+      for (const asset of pending) {
+        try {
+          const { url, path } = await uploadDataUrlAsset(asset.src, asset.id, asset.name);
+          setAssets((current) => current.map((item) => item.id === asset.id ? { ...item, src: url, storagePath: path } : item));
+        } catch (err) {
+          console.warn("Asset migration failed for", asset.id, err);
+          migratingAssetsRef.current.delete(asset.id);
+        }
+      }
+    })();
+  }, [assets, user]);
   const saveOfferDraft = (draft) => setOfferDrafts((current) => [{ ...draft, id: makeId("offer-draft"), createdAt: new Date().toISOString().slice(0, 10) }, ...current]);
   const copyCoupon = (value) => copyToClipboard(`${value.title}\nCode: ${value.code}\n${value.offer}\n${value.terms}`);
   const exportCoupon = (value) => exportWorkspaceFile(`${value.code.toLowerCase()}-pickup-coupon.txt`, `${value.title}\n\nCode: ${value.code}\n${value.offer}\n\n${value.terms}\n`, "text/plain");
-  const exportWorkspace = () => exportWorkspaceFile("fired-arts-growth-hq-workspace.json", JSON.stringify({ schemaVersion: 2, exportedAt: new Date().toISOString(), campaigns, conversations, assets, targets, offerDrafts, settings }, null, 2));
+  const exportWorkspace = () => exportWorkspaceFile("fired-arts-growth-hq-workspace.json", JSON.stringify({ ...readStoredWorkspace(), campaigns, conversations, assets, targets, offerDrafts, coupon, researchContent, opportunities, metrics, decisions }, null, 2));
+  const resetWorkspace = async () => { await resetCloudWorkspace(); window.location.reload(); };
   const openCampaign = (id) => { setSelectedCampaignId(id); setActive("social"); };
   const createCampaign = ({ title, audience, objective, offer, targetId }) => {
     const campaignId = makeId("campaign");
@@ -703,10 +691,9 @@ function App({ session, signOut }) {
       hook: `${offer.title}: ${offer.firstStep}.`,
       caption: `${offer.description} Fired Arts is building a welcoming local reason to visit in Kokomo.`,
       cta: "Plan your visit", hashtags: "#FiredArts #KokomoCreates #SupportLocal",
-      destinationUrl: settings?.websiteUrl || "", assetIds: [], status: "draft", scheduledAt: "",
+      destinationUrl: "https://firedartsstudio.com/visit", assetIds: [], status: "Draft", scheduledAt: "",
     }]));
-    const now = new Date().toISOString();
-    const campaign = { id: campaignId, schemaVersion: 2, title, objective, offerId: offer.id, audience, keyMessage: offer.description, cta: "Plan your visit", destinationUrl: settings?.websiteUrl || "", startDate: "", endDate: "", status: "draft", platformIds, assetIds: [], targetIds: targetId ? [targetId] : [], variants, createdAt: now, updatedAt: now, history: [] };
+    const campaign = { id: campaignId, title, objective, offerId: offer.id, audience, keyMessage: offer.description, cta: "Plan your visit", destinationUrl: "https://firedartsstudio.com/visit", startDate: "", endDate: "", status: "Draft", platformIds, assetIds: [], targetIds: targetId ? [targetId] : [], variants };
     setCampaigns((current) => [campaign, ...current]);
     setSelectedCampaignId(campaignId);
     setCampaignModal(false);
@@ -753,12 +740,15 @@ function App({ session, signOut }) {
     ]);
   };
   const updateConversation = (updated) => setConversations((current) => current.map((conversation) => conversation.id === updated.id ? updated : conversation));
-  const logConversationActivity = (conversation, type = "manual-send") => updateConversation({ ...conversation, status: type === "manual-send" ? "sent" : "handoff", history: [...(conversation.history || []), { id: makeId("activity"), occurredAt: new Date().toISOString(), actorId: session.uid, type, detail: type === "manual-send" ? "Owner explicitly confirmed an external send." : "Provider handoff recorded." }] });
+  const logConversationActivity = (conversation) => {
+    const date = new Date().toISOString().slice(0, 10);
+    updateConversation({ ...conversation, status: "Sent", lastContactedAt: date, history: [...(conversation.history || []), { id: makeId("activity"), date, type: "Message sent", channel: conversation.channel, body: conversation.messageDraft }] });
+  };
   const startConversation = (target) => {
     const existing = conversations.find((conversation) => conversation.targetId === target.id && (!selectedCampaign || conversation.campaignId === selectedCampaign.id));
     if (existing) { setActive("conversations"); return; }
     const campaign = selectedCampaign || campaigns[0];
-    const newConversation = { id: makeId("conversation"), schemaVersion: 2, targetId: target.id, campaignId: campaign?.id || "", channel: "Email", contactName: "", status: "draft", messageDraft: `Hi — ${target.name} and Fired Arts seem like a natural local fit. We would love to share a simple idea around ${(target.offer || "a creative partnership").toLowerCase()}. Would you be open to a quick conversation?`, notes: "Personalize this opener after verifying the best contact path.", lastContactedAt: "", nextFollowUpAt: "", history: [], createdAt: new Date().toISOString() };
+    const newConversation = { id: makeId("conversation"), targetId: target.id, campaignId: campaign?.id || "", channel: "Email", contactName: "", status: "Drafted", messageDraft: `Hi — ${target.name} and Fired Arts seem like a natural local fit. We would love to share a simple idea around ${target.offer.toLowerCase()}. Would you be open to a quick conversation?`, notes: "Personalize this opener after verifying the best contact path.", lastContactedAt: "", nextFollowUpAt: "", history: [] };
     setConversations((current) => [newConversation, ...current]);
     setActive("conversations");
   };
@@ -772,29 +762,34 @@ function App({ session, signOut }) {
 
   const view = useMemo(() => {
     if (active === "campaigns") return <CampaignsView campaigns={campaigns} onOpen={openCampaign} onCreate={() => setCampaignModal(true)} />;
-    if (active === "social") return <SocialStudioView campaign={selectedCampaign} assets={assets} targets={targets} settings={workspaceSettings} onChange={updateCampaign} onSave={() => updateCampaign({ ...selectedCampaign, updatedAt: new Date().toISOString() })} onExport={exportCampaign} onStartConversation={startConversation} onOpenAssets={() => setActive("assets")} onCreate={() => setCampaignModal(true)} onBack={() => setActive("campaigns")} />;
+    if (active === "social") return <SocialStudioView campaign={selectedCampaign} assets={assets} targets={targets} onChange={updateCampaign} onSave={() => updateCampaign({ ...selectedCampaign, status: "Draft" })} onExport={exportCampaign} onStartConversation={startConversation} onOpenAssets={() => setActive("assets")} onCreate={() => setCampaignModal(true)} onBack={() => setActive("campaigns")} />;
     if (active === "calendar") return <CalendarView campaigns={campaigns} onOpen={openCampaign} onChangeCampaign={updateCampaign} />;
     if (active === "conversations") return <ConversationsView conversations={conversations} targets={targets} onChange={updateConversation} onStart={startConversation} onContact={() => setActive("contacts")} onLogActivity={logConversationActivity} />;
     if (active === "contacts" || active === "outreach") return <OutreachView targets={targets} onTarget={setDetail} onTargetChange={updateTarget} onExportPacket={exportOutreachPacket} />;
     if (active === "competitors") return <CompetitorsView />;
     if (active === "offers") return <OffersView onOffer={openOffer} offerDrafts={offerDrafts} />;
     if (active === "operations") return <OperationsView completed={completed} toggleAction={toggleAction} coupon={coupon} onDraftCoupon={() => setCouponModal(true)} />;
-    if (active === "research") return <ResearchView content={researchContent} onContentChange={() => {}} onExport={exportResearchPacket} />;
-    if (active === "opportunities") return <OpportunitiesView opportunities={opportunities} decisions={decisions} onOpportunityChange={() => {}} onDecisionChange={() => {}} />;
-    if (active === "metrics") return <MetricsView metrics={metrics} onMetricChange={() => {}} />;
-    if (active === "assets") return <AssetsView assets={assets} onUpload={async (file) => { const asset = await uploadAssetFile(file); setAssets((current) => [asset, ...current]); }} onRemoveAsset={removeAsset} />;
+    if (active === "research") return <ResearchView content={researchContent} onContentChange={(updated) => setResearchContent((current) => current.map((item) => item.id === updated.id ? updated : item))} onExport={exportResearchPacket} />;
+    if (active === "opportunities") return <OpportunitiesView opportunities={opportunities} decisions={decisions} onOpportunityChange={(updated) => setOpportunities((current) => current.map((item) => item.id === updated.id ? updated : item))} onDecisionChange={(updated) => setDecisions((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
+    if (active === "metrics") return <MetricsView metrics={metrics} onMetricChange={(updated) => setMetrics((current) => current.map((item) => item.id === updated.id ? updated : item))} />;
+    if (active === "assets") return <AssetsView assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} onRemoveAsset={removeAsset} />;
     if (active === "templates") return <TemplatesView onUse={useTemplate} />;
-    if (active === "approvals") return <ApprovalsView campaigns={campaigns} onOpen={openCampaign} onApprove={(id) => { const campaign = campaigns.find((item) => item.id === id); if (campaign?.status === "review") updateCampaign({ ...campaign, status: "approved", updatedAt: new Date().toISOString(), history: [...(campaign.history || []), { id: makeId("activity"), actorId: session.uid, type: "status:review->approved", occurredAt: new Date().toISOString() }], variants: Object.fromEntries(platformIds.map((platform) => [platform, { ...campaign.variants[platform], status: "approved" }])) }); }} />;
-    if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} researchContent={[]} opportunities={[]} metrics={metrics} />;
-    if (active === "connections") return <ConnectionsView />;
-    if (active === "settings") return <SettingsView settings={settings} onSave={(next) => setSettingsRecords([{ ...next, id: "primary", schemaVersion: 2 }])} onExportWorkspace={exportWorkspace} archiveCount={researchArchive.length} />;
-    if (active === "creator") return <FireCreatorSuite assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} onOpenAssets={() => setActive("assets")} brandVoice={settings?.brandVoice} />;
-    return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} campaigns={campaigns} conversations={conversations} assets={assets} setActive={setActive} />;
-  }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchArchive.length, researchContent, selectedCampaign, settings, targets]);
+    if (active === "approvals") return <ApprovalsView campaigns={campaigns} onOpen={openCampaign} onApprove={(id) => { const campaign = campaigns.find((item) => item.id === id); if (campaign) updateCampaign({ ...campaign, status: "Approved", variants: Object.fromEntries(platformIds.map((platform) => [platform, { ...campaign.variants[platform], status: "Approved" }])) }); }} />;
+    if (active === "reports") return <ReportsView campaigns={campaigns} conversations={conversations} researchContent={researchContent} opportunities={opportunities} metrics={metrics} />;
+    if (active === "settings") return <SettingsView onExportWorkspace={exportWorkspace} onResetWorkspace={resetWorkspace} />;
+    if (active === "creator") return <FireCreatorSuite assets={assets} onAddAsset={(asset) => setAssets((current) => [asset, ...current])} onOpenAssets={() => setActive("assets")} />;
+    return <Overview range={range} setRange={setRange} onBuild={() => setBuilder(offers[0])} onOffer={openOffer} onTarget={setDetail} targets={targets} setActive={setActive} />;
+  }, [active, assets, campaigns, completed, conversations, coupon, decisions, metrics, offerDrafts, opportunities, range, researchContent, selectedCampaign, targets]);
 
-  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} syncStatus={syncStatus} ownerEmail={session.email} onSignOut={signOut} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Authenticated cloud workspace · provider actions require confirmation</span></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
+  return <div className="app-shell"><Sidebar active={active} setActive={setActive} /><main className="main-canvas"><TopBar active={active} onBuild={() => setCampaignModal(true)} />{view}<footer className="app-footer"><span>Fired Arts Studio · Kokomo, Indiana</span><span>Shared growth workspace · synced live between owners · publishing and messaging remain manual</span><FooterAuth /></footer></main><DetailDrawer item={detail} onClose={() => setDetail(null)} onBuild={() => buildOffer(detail)} onStartConversation={startConversation} onSaveTarget={updateTarget} /><BuilderModal offer={builder} onClose={() => setBuilder(null)} onSaveDraft={saveOfferDraft} /><CampaignModal open={campaignModal} offers={offers} targets={targets} onClose={() => setCampaignModal(false)} onSave={createCampaign} />{couponModal && <CouponModal coupon={coupon} onClose={() => setCouponModal(false)} onSave={(value) => { setCoupon(value); setCouponModal(false); }} onCopy={copyCoupon} onExport={exportCoupon} />}</div>;
 }
 
 export default App;
 
-createRoot(document.getElementById("root")).render(<ProductionGate>{({ session, signOut }) => <App session={session} signOut={signOut} />}</ProductionGate>);
+createRoot(document.getElementById("root")).render(
+  <WorkspaceErrorBoundary>
+    <AuthGate>
+      <App />
+    </AuthGate>
+  </WorkspaceErrorBoundary>
+);

@@ -16,7 +16,7 @@ test("research archive preserves provenance and is always read only", () => {
 test("archive records do not masquerade as live records", () => {
   const archive = buildResearchArchive();
   assert.ok(archive.every((record) => record.id.startsWith("archive-")));
-  assert.ok(archive.some((record) => record.recordType === "campaign"));
+  assert.ok(archive.every((record) => record.recordType !== "campaign"));
+  assert.ok(archive.every((record) => record.recordType !== "conversation"));
   assert.ok(archive.some((record) => record.evidenceStatus === "Needs verification"));
 });
-

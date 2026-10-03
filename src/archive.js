@@ -1,4 +1,4 @@
-import { seedCampaigns, seedConversations, outreachTargets } from "./data.js";
+import { outreachTargets } from "./data.js";
 import { researchContent, researchMetrics, researchOpportunities, researchSources } from "./researchData.js";
 
 export const ARCHIVE_VERSION = 2;
@@ -15,8 +15,6 @@ export function buildResearchArchive() {
     readOnly: true,
   }));
   return [
-    ...wrap("campaign", seedCampaigns, "supplied-growth-plan", "Draft only"),
-    ...wrap("conversation", seedConversations, "supplied-growth-plan", "Draft only"),
     ...wrap("contact", outreachTargets, "regional-outreach-research", "Needs verification"),
     ...wrap("content", researchContent, "supplied-content-pack", "Draft only"),
     ...wrap("metric", researchMetrics, "supplied-benchmark", "Baseline"),
